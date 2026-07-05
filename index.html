@@ -28,6 +28,14 @@
   links cannot attach files, so one-click attach needs the share
   sheet; fully automatic sending would need a server).
 
+  SAVING / FILENAMES
+  __________________
+  All PDFs are named amount_ddmonyyyy_customer_job.pdf (the BRC Box
+  invoice convention). "Save PDF" uses the browser save-file picker,
+  which remembers the last folder per site — point it at the Box
+  Invoices folder once and later saves default there. Print-to-PDF
+  picks up the same name via the page title.
+
   UPDATING PRICES LATER
   ______________________
   All editable numbers live in the MATERIALS / TIERS / COLOR_OPTIONS
@@ -459,7 +467,8 @@
     </div>
     <div class="invoice-actions no-print">
       <button class="btn btn-primary" id="sendPdfBtn">Email / text PDF</button>
-      <button class="btn btn-ghost" id="printBtn">Print / save as PDF</button>
+      <button class="btn btn-ghost" id="savePdfBtn">Save PDF</button>
+      <button class="btn btn-ghost" id="printBtn">Print</button>
       <button class="btn btn-ghost" id="newQuoteBtn">Start new quote</button>
     </div>
     <div class="form-note no-print" id="sendNote" hidden>PDF downloaded — attach it to the email that just opened.</div>
@@ -674,6 +683,18 @@
     return t.join('\n');
   }
 
+  // Filename matches the Box invoice convention:
+  // amount_ddmonyyyy_customer_job.pdf (e.g. 2.80_05jul2026_jamie_lopez_sensor_housing.pdf)
+  var MONTHS = ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'];
+  function invoiceFilename(c, d){
+    var slug = function(s){
+      return s.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+    };
+    var dateStr = String(d.getDate()).padStart(2, '0') + MONTHS[d.getMonth()] + d.getFullYear();
+    return c.grandTotal.toFixed(2) + '_' + dateStr + '_' +
+      slug($('custName').value) + '_' + slug($('jobDesc').value) + '.pdf';
+  }
+
   function generateInvoice(){
     var c = calculate();
     var lines = buildLines(c);
@@ -709,7 +730,8 @@
       quoteNo: quoteNo.replace('Quote #', ''),
       dateStr: $('invDate').textContent,
       customer: $('custName').value.trim(),
-      job: $('jobDesc').value.trim()
+      job: $('jobDesc').value.trim(),
+      filename: invoiceFilename(c, d)
     };
     $('sendNote').hidden = true;
 
@@ -767,13 +789,75 @@
     });
   }
 
+  function downloadBlob(blob, filename){
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(function(){ URL.revokeObjectURL(url); }, 4000);
+  }
+
+  $('savePdfBtn').addEventListener('click', function(){
+    if (!lastInvoice) return;
+    var btn = $('savePdfBtn');
+    var oldLabel = btn.textContent;
+    var busy = function(label){ btn.disabled = true; btn.textContent = label; };
+    var done = function(label){
+      btn.textContent = label || oldLabel;
+      if (label){ setTimeout(function(){ btn.textContent = oldLabel; }, 2000); }
+      btn.disabled = false;
+    };
+    var filename = lastInvoice.filename;
+
+    // The picker must open inside the click gesture, before the async PDF
+    // build. Chrome remembers the chosen folder per id, so after pointing it
+    // at Box/Invoices once, later saves default there.
+    if (window.showSaveFilePicker){
+      window.showSaveFilePicker({
+        suggestedName: filename,
+        id: 'brc-invoices',
+        types: [{ description:'PDF', accept:{ 'application/pdf':['.pdf'] } }]
+      }).then(function(handle){
+        busy('Saving…');
+        return buildPdfBlob().then(function(blob){
+          return handle.createWritable().then(function(writable){
+            return writable.write(blob).then(function(){ return writable.close(); });
+          });
+        }).then(function(){ done('Saved ✓'); });
+      }).catch(function(err){
+        if (err && err.name === 'AbortError'){ done(); return; }
+        // Picker or write failed: plain download instead
+        busy('Preparing PDF…');
+        buildPdfBlob()
+          .then(function(blob){ downloadBlob(blob, filename); done(); })
+          .catch(function(){ window.print(); done(); });
+      });
+      return;
+    }
+
+    busy('Preparing PDF…');
+    buildPdfBlob()
+      .then(function(blob){ downloadBlob(blob, filename); done(); })
+      .catch(function(){ window.print(); done(); });
+  });
+
+  // Print-to-PDF defaults its filename to the page title
+  var pageTitle = document.title;
+  window.addEventListener('beforeprint', function(){
+    if (lastInvoice) document.title = lastInvoice.filename.replace(/\.pdf$/, '');
+  });
+  window.addEventListener('afterprint', function(){ document.title = pageTitle; });
+
   $('sendPdfBtn').addEventListener('click', function(){
     if (!lastInvoice) return;
     var btn = $('sendPdfBtn');
     var oldLabel = btn.textContent;
     btn.disabled = true;
     btn.textContent = 'Preparing PDF…';
-    var filename = lastInvoice.quoteNo + '.pdf';
+    var filename = lastInvoice.filename;
     buildPdfBlob().then(function(blob){
       var file = new File([blob], filename, { type:'application/pdf' });
       if (navigator.canShare && navigator.canShare({ files:[file] })){
@@ -788,14 +872,7 @@
       }
       // No file-sharing support: download the PDF and open a pre-filled
       // email (mailto: cannot attach files) so the user attaches it
-      var url = URL.createObjectURL(blob);
-      var a = document.createElement('a');
-      a.href = url;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      setTimeout(function(){ URL.revokeObjectURL(url); }, 4000);
+      downloadBlob(blob, filename);
       $('sendNote').hidden = false;
       window.location.href = 'mailto:?subject=' +
         encodeURIComponent('BRC 3D Print Estimate — ' + lastInvoice.quoteNo) +
