@@ -128,7 +128,7 @@
   .field .hint{ font-size:.76rem; color:var(--muted); margin-top:4px; }
   .row2{ display:grid; grid-template-columns:1fr 1fr; gap:12px; }
 
-  input[type=text], input[type=number], input[type=date], select{
+  input[type=text], input[type=number], input[type=date], input[type=email], input[type=password], select{
     width:100%; font-family:'Inter',sans-serif; font-size:.95rem; color:var(--ink);
     background:#fff; border:1.5px solid var(--line-strong); border-radius:7px;
     padding:9px 11px; transition:border-color .15s ease, box-shadow .15s ease;
@@ -289,6 +289,14 @@
 
   .invoice-actions{ display:flex; flex-wrap:wrap; gap:10px; margin-top:16px; }
   .invoice-actions .btn{ width:auto; flex:1 1 150px; }
+
+  .send-brc{
+    display:grid; grid-template-columns:1.4fr 1fr auto; gap:10px; align-items:center;
+    margin-top:12px; padding:14px; background:var(--paper); border:1px solid var(--line); border-radius:var(--radius);
+  }
+  .send-brc .btn{ width:auto; margin:0; padding:9px 22px; }
+  #sendBrcStatus{ grid-column:1 / -1; font-size:.8rem; color:var(--muted); min-height:1em; }
+  @media (max-width:640px){ .send-brc{ grid-template-columns:1fr; } }
 
   /* ---------- a11y / motion ---------- */
   .btn:focus-visible{ outline:2.5px solid var(--sky); outline-offset:2px; }
@@ -463,9 +471,16 @@
     </div>
     <div class="invoice-actions no-print">
       <button class="btn btn-primary" id="sendPdfBtn">Email / text PDF</button>
+      <button class="btn btn-ghost" id="sendBrcBtn">Send from BRC</button>
       <button class="btn btn-ghost" id="savePdfBtn">Save PDF</button>
       <button class="btn btn-ghost" id="printBtn">Print</button>
       <button class="btn btn-ghost" id="newQuoteBtn">Start new quote</button>
+    </div>
+    <div class="send-brc no-print" id="sendBrcPanel" hidden>
+      <input type="email" id="sendToEmail" placeholder="Customer email" autocomplete="off">
+      <input type="password" id="sendPasscode" placeholder="Staff passcode" autocomplete="off">
+      <button class="btn btn-primary" id="sendBrcGo">Send</button>
+      <span id="sendBrcStatus" role="status"></span>
     </div>
     <div class="form-note no-print" id="sendNote" hidden>PDF downloaded — attach it to the email that just opened.</div>
   </div>
@@ -730,6 +745,8 @@
       filename: invoiceFilename(c, d)
     };
     $('sendNote').hidden = true;
+    $('sendBrcPanel').hidden = true;
+    $('sendBrcStatus').textContent = '';
 
     $('invoiceWrap').classList.remove('hidden');
     if (typeof $('invoiceWrap').scrollIntoView === 'function'){
@@ -841,6 +858,75 @@
     buildPdfBlob()
       .then(function(blob){ downloadBlob(blob, filename); done(); })
       .catch(function(){ window.print(); done(); });
+  });
+
+  /* ---- Send from BRC: emails the PDF from binghamresearch@usu.edu via the
+     brc-send Cloudflare Worker (worker/ in this repo). Passcode-gated. ---- */
+  var WORKER_URL = ''; // set to the deployed Worker URL to enable this feature
+
+  if (!WORKER_URL){ $('sendBrcBtn').style.display = 'none'; }
+
+  function blobToBase64(blob){
+    return new Promise(function(resolve, reject){
+      var fr = new FileReader();
+      fr.onload = function(){ resolve(String(fr.result).split(',')[1]); };
+      fr.onerror = function(){ reject(fr.error); };
+      fr.readAsDataURL(blob);
+    });
+  }
+
+  $('sendBrcBtn').addEventListener('click', function(){
+    if (!lastInvoice) return;
+    var panel = $('sendBrcPanel');
+    panel.hidden = !panel.hidden;
+    if (!panel.hidden){ $('sendToEmail').focus(); }
+  });
+
+  $('sendBrcGo').addEventListener('click', function(){
+    if (!lastInvoice) return;
+    var to = $('sendToEmail').value.trim();
+    var passcode = $('sendPasscode').value;
+    var status = $('sendBrcStatus');
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)){ status.textContent = 'Enter a valid customer email.'; return; }
+    if (!passcode){ status.textContent = 'Enter the staff passcode.'; return; }
+
+    var btn = $('sendBrcGo');
+    btn.disabled = true;
+    status.textContent = 'Building PDF…';
+    buildPdfBlob().then(blobToBase64).then(function(pdfBase64){
+      status.textContent = 'Sending…';
+      return fetch(WORKER_URL + '/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          passcode: passcode,
+          to: to,
+          filename: lastInvoice.filename,
+          quoteNo: lastInvoice.quoteNo,
+          total: money(lastInvoice.c.grandTotal),
+          pdfBase64: pdfBase64
+        })
+      });
+    }).then(function(res){
+      return res.json().then(function(data){
+        if (res.ok){
+          status.textContent = 'Sent to ' + to + ' from binghamresearch@usu.edu ✓';
+          $('sendPasscode').value = '';
+        } else if (data.error === 'bad_passcode'){
+          status.textContent = 'Wrong passcode.';
+        } else if (data.error === 'reauth_needed'){
+          status.textContent = 'Sending disabled — BRC mailbox needs re-authorization (see worker README).';
+        } else if (data.error === 'daily_cap'){
+          status.textContent = 'Daily send limit reached; try tomorrow or use Email / text PDF.';
+        } else {
+          status.textContent = 'Send failed (' + (data.error || res.status) + '). Use Email / text PDF instead.';
+        }
+      });
+    }).catch(function(){
+      status.textContent = 'Could not reach the send service. Use Email / text PDF instead.';
+    }).then(function(){
+      btn.disabled = false;
+    });
   });
 
   // Print-to-PDF defaults its filename to the page title

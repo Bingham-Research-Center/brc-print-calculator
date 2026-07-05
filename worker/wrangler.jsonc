@@ -1,0 +1,21 @@
+{
+  // Cloudflare Worker: sends estimate PDFs from binghamresearch@usu.edu via
+  // Microsoft Graph. IDs below are not secrets; real secrets are set with
+  // `wrangler secret put` (MS_CLIENT_SECRET, SEND_PASSCODE, SETUP_KEY).
+  "name": "brc-send",
+  "main": "src/index.js",
+  "compatibility_date": "2026-07-05",
+  "observability": { "enabled": true },
+
+  // Fill after Phase 0 / `wrangler kv namespace create TOKENS`
+  "kv_namespaces": [{ "binding": "TOKENS", "id": "REPLACE_WITH_KV_NAMESPACE_ID" }],
+
+  // Daily refresh keeps the Microsoft refresh token's 90-day clock reset
+  "triggers": { "crons": ["0 13 * * *"] },
+
+  "vars": {
+    "MS_TENANT_ID": "REPLACE_WITH_TENANT_ID",
+    "MS_CLIENT_ID": "REPLACE_WITH_CLIENT_ID",
+    "ALLOWED_ORIGIN": "https://bingham-research-center.github.io"
+  }
+}
