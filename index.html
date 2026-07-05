@@ -779,7 +779,10 @@
       return html2pdf().set({
         margin: 10,
         image: { type:'jpeg', quality:0.95 },
-        html2canvas: { scale:2, backgroundColor:'#ffffff' },
+        // scrollY/scrollX: 0 — html2canvas captures a blank page when the
+        // window is scrolled (and it always is: the page scrolls down to
+        // the invoice), so pin the clone's scroll to the top
+        html2canvas: { scale:2, backgroundColor:'#ffffff', scrollY:0, scrollX:0 },
         jsPDF: { unit:'mm', format:'letter' }
       }).from($('invoiceSheet')).outputPdf('blob');
     });
