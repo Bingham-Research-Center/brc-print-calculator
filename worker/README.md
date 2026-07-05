@@ -7,12 +7,13 @@ passcode, and sends the PDF via Microsoft Graph as binghamresearch@usu.edu
 
 ## One-time setup
 
-Prereqs (browser, done by whoever holds the mailbox):
-1. MFA method registered for binghamresearch@usu.edu (aka.ms/mfasetup).
-2. Entra app registration `BRC Print Calculator Sender` (single tenant,
+Prereqs (browser):
+1. Entra app registration `BRC Print Calculator Sender` (single tenant,
    platform Web) with delegated `Mail.Send` + `offline_access` and a client
    secret (value goes in the team password manager only). Record the tenant
-   ID and client ID.
+   ID and client ID. Register under any staff account (the portal requires
+   MFA, which the shared mailbox account lacks — that's fine; the mailbox
+   never opens the portal, it only signs in once at the authorize link).
 
 Deploy (needs a free Cloudflare account, `wrangler login`):
 ```
