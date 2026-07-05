@@ -59,7 +59,10 @@
 
   /* ---------- header ---------- */
   .app-header{
-    background:var(--ink);
+    background:
+      repeating-linear-gradient(-45deg, rgba(255,255,255,.035) 0 2px, transparent 2px 9px),
+      var(--ink);
+    border-top:3px solid var(--accent);
     color:#fff;
     padding:22px 20px;
     margin-bottom:28px;
@@ -159,10 +162,28 @@
     background-image:repeating-linear-gradient(rgba(255,255,255,.035) 0 1px, transparent 1px 4px);
     pointer-events:none;
   }
+  .screen-status{
+    display:flex; align-items:center; gap:7px;
+    font-family:'IBM Plex Mono',monospace; font-size:.66rem; letter-spacing:.14em;
+    text-transform:uppercase; color:#8FD4AE; margin-bottom:12px;
+    padding-bottom:10px; border-bottom:1px solid rgba(255,255,255,.12);
+  }
+  .st-dot{
+    width:7px; height:7px; border-radius:50%; background:#5FBF8A;
+    box-shadow:0 0 6px 1px rgba(95,191,138,.7);
+    animation:breathe 2.4s ease-in-out infinite;
+  }
+  @keyframes breathe{ 0%,100%{ opacity:1; } 50%{ opacity:.45; } }
+  .st-right{ margin-left:auto; color:#7FA0B8; }
   .screen-label{
     font-family:'IBM Plex Mono',monospace; font-size:.68rem; letter-spacing:.12em;
     text-transform:uppercase; color:#7FA0B8; margin-bottom:10px;
   }
+  .screen-label::after{
+    content:"▍"; color:var(--accent); margin-left:2px;
+    animation:blink 1.2s steps(1) infinite;
+  }
+  @keyframes blink{ 50%{ opacity:0; } }
   .screen-row{
     display:flex; justify-content:space-between; gap:10px;
     font-family:'IBM Plex Mono',monospace; font-size:.78rem; color:#DCE6EC;
@@ -216,6 +237,13 @@
     background-image:radial-gradient(circle,var(--line-strong) 1.4px,transparent 1.6px);
     background-size:10px 3px; background-repeat:repeat-x;
   }
+  .invoice-stamp{
+    position:absolute; top:30px; left:50%; transform:translateX(-50%) rotate(-6deg);
+    font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:.82rem;
+    letter-spacing:.22em; text-transform:uppercase; color:var(--accent-ink);
+    border:2.5px solid currentColor; border-radius:6px; padding:4px 14px 4px 16px;
+    opacity:.45; pointer-events:none;
+  }
   .invoice-head{ display:flex; justify-content:space-between; gap:16px; flex-wrap:wrap; margin-bottom:22px; }
   .invoice-org{ font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:1.15rem; }
   .invoice-org-sub{ font-size:.82rem; color:var(--muted); }
@@ -246,6 +274,14 @@
 
   .invoice-actions{ display:flex; gap:10px; margin-top:16px; }
   .invoice-actions .btn{ width:auto; flex:1; }
+
+  /* ---------- a11y / motion ---------- */
+  .btn:focus-visible{ outline:2.5px solid var(--sky); outline-offset:2px; }
+  .tier-card:focus-within, .check-row:focus-within{ outline:2.5px solid var(--sky); outline-offset:2px; border-radius:9px; }
+  @media (prefers-reduced-motion: reduce){
+    .st-dot, .screen-label::after, .tt-value.pulse{ animation:none; }
+    .btn, .tier-card, input, select{ transition:none; }
+  }
 
   /* ---------- print ---------- */
   @media print{
@@ -367,6 +403,7 @@
     <!-- READOUT -->
     <aside class="panel readout-panel">
       <div class="screen">
+        <div class="screen-status"><span class="st-dot"></span>Ready<span class="st-right">Bambu H2C</span></div>
         <div class="screen-label">// live price readout</div>
         <div id="screenLines"></div>
         <div class="screen-total">
@@ -383,6 +420,7 @@
   <!-- INVOICE -->
   <div class="invoice-wrap hidden" id="invoiceWrap">
     <div class="invoice-sheet" id="invoiceSheet">
+      <div class="invoice-stamp">Estimate</div>
       <div class="invoice-head">
         <div>
           <div class="invoice-org">Bingham Research Center</div>
@@ -456,6 +494,7 @@
 
   var $ = function(id){ return document.getElementById(id); };
   var money = function(n){ return '$' + n.toFixed(2); };
+  var scrollMode = (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) ? 'auto' : 'smooth';
 
   var materialSelect = $('material');
   MATERIALS.forEach(function(m){
@@ -631,7 +670,7 @@
 
     $('invoiceWrap').classList.remove('hidden');
     if (typeof $('invoiceWrap').scrollIntoView === 'function'){
-      $('invoiceWrap').scrollIntoView({ behavior:'smooth', block:'start' });
+      $('invoiceWrap').scrollIntoView({ behavior:scrollMode, block:'start' });
     }
   }
 
@@ -660,7 +699,7 @@
   $('printBtn').addEventListener('click', function(){ window.print(); });
   $('newQuoteBtn').addEventListener('click', function(){
     $('invoiceWrap').classList.add('hidden');
-    window.scrollTo({ top:0, behavior:'smooth' });
+    window.scrollTo({ top:0, behavior:scrollMode });
   });
 
   /* ---- init ---- */
