@@ -1,0 +1,677 @@
+<!DOCTYPE html>
+<!--
+  BRC 3D Print Price Calculator & Invoice Generator
+  Bingham Research Center — Bambu H2C
+
+  Hosted at: https://bingham-research-center.github.io/brc-print-calculator/
+  Repo:      https://github.com/Bingham-Research-Center/brc-print-calculator
+
+  HOW TO EMBED
+  ____________
+  Option A — iframe (safest, works on any CMS/site builder):
+    <iframe src="https://bingham-research-center.github.io/brc-print-calculator/"
+            style="width:100%; min-height:1000px; border:0;"
+            title="3D Print Price Calculator"></iframe>
+
+  Option B — paste directly into a page that allows raw HTML/JS
+    (e.g. a custom HTML block). The whole file is self-contained:
+    no external accounts, no server, no build step.
+
+  UPDATING PRICES LATER
+  ______________________
+  All editable numbers live in the MATERIALS / TIERS / COLOR_OPTIONS
+  constants near the top of the <script> block below. Change a number
+  there and the whole tool (live readout + invoice) updates automatically.
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BRC 3D Print Price Calculator</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&amp;family=Inter:wght@400;500;600;700&amp;family=IBM+Plex+Mono:wght@500;600&amp;display=swap" rel="stylesheet">
+<style>
+  :root{
+    --ink:#0F2439;        /* Aggie Blue */
+    --paper:#FFFFFF;
+    --paper-warm:#FAF7F2; /* tint of Sand */
+    --line:#D8DCDD;
+    --line-strong:#A2AAAD;
+    --muted:#5B6670;
+    --accent:#F58220;     /* Tangerine — heated-nozzle glow */
+    --accent-ink:#7A3C0A;
+    --sky:#288DC2;
+    --ok:#4E8768;
+    --radius:10px;
+    font-size:16px;
+  }
+  *{ box-sizing:border-box; }
+  body{
+    margin:0;
+    background:var(--paper-warm);
+    color:var(--ink);
+    font-family:'Inter',system-ui,-apple-system,sans-serif;
+    line-height:1.45;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{ max-width:1180px; margin:0 auto; padding:0 20px 64px; }
+
+  /* ---------- header ---------- */
+  .app-header{
+    background:var(--ink);
+    color:#fff;
+    padding:22px 20px;
+    margin-bottom:28px;
+  }
+  .app-header-inner{
+    max-width:1180px; margin:0 auto;
+    display:flex; align-items:baseline; justify-content:space-between; flex-wrap:wrap; gap:8px;
+  }
+  .brand{ display:flex; align-items:baseline; gap:10px; }
+  .brand-mark{
+    font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:1.05rem;
+    letter-spacing:.04em; color:var(--accent);
+    border:1.5px solid var(--accent); border-radius:6px; padding:2px 8px;
+  }
+  .brand-sub{ font-size:.85rem; color:#B9C3CC; letter-spacing:.02em; }
+  .app-header h1{
+    font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:1.3rem; margin:0;
+    letter-spacing:-.01em;
+  }
+
+  /* ---------- layout ---------- */
+  .app-grid{
+    display:grid; grid-template-columns:1.15fr .85fr; gap:24px; align-items:start;
+  }
+  @media (max-width:920px){ .app-grid{ grid-template-columns:1fr; } }
+
+  .panel{
+    background:var(--paper);
+    border:1px solid var(--line);
+    border-radius:var(--radius);
+    padding:24px 24px 20px;
+  }
+
+  /* ---------- form sections ---------- */
+  fieldset.section{ border:none; margin:0 0 26px; padding:0; }
+  fieldset.section:last-of-type{ margin-bottom:6px; }
+  fieldset.section legend{
+    font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:.8rem;
+    letter-spacing:.09em; text-transform:uppercase; color:var(--muted);
+    padding:0 0 10px; width:100%; border-bottom:1px solid var(--line); margin-bottom:16px;
+  }
+  fieldset.section legend b{ color:var(--accent-ink); font-weight:700; margin-right:8px; }
+
+  .field{ margin-bottom:14px; }
+  .field label.f-label{
+    display:block; font-size:.83rem; font-weight:600; color:var(--ink); margin-bottom:5px;
+  }
+  .field .hint{ font-size:.76rem; color:var(--muted); margin-top:4px; }
+  .row2{ display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+
+  input[type=text], input[type=number], input[type=date], select{
+    width:100%; font-family:'Inter',sans-serif; font-size:.95rem; color:var(--ink);
+    background:#fff; border:1.5px solid var(--line-strong); border-radius:7px;
+    padding:9px 11px; transition:border-color .15s ease, box-shadow .15s ease;
+  }
+  input:focus, select:focus{
+    outline:none; border-color:var(--accent);
+    box-shadow:0 0 0 3px rgba(245,130,32,.18);
+  }
+  select{ appearance:none; background-image:linear-gradient(45deg,transparent 50%,var(--muted) 50%),linear-gradient(135deg,var(--muted) 50%,transparent 50%); background-position:calc(100% - 18px) center, calc(100% - 13px) center; background-size:5px 5px, 5px 5px; background-repeat:no-repeat; padding-right:32px; }
+
+  .material-note{ font-size:.78rem; color:var(--muted); margin-top:5px; }
+  .material-note strong{ color:var(--ink); }
+
+  /* tier cards */
+  .tier-cards{ display:grid; gap:10px; }
+  .tier-card{
+    display:flex; gap:12px; align-items:flex-start; cursor:pointer;
+    border:1.5px solid var(--line-strong); border-radius:9px; padding:11px 13px;
+    transition:border-color .15s ease, background .15s ease;
+  }
+  .tier-card:hover{ border-color:var(--accent); }
+  .tier-card input{ margin-top:3px; accent-color:var(--accent); }
+  .tier-card .t-title{ font-weight:700; font-size:.92rem; }
+  .tier-card .t-sub{ font-size:.8rem; color:var(--muted); }
+  .tier-card.active{ border-color:var(--accent); background:#FFF6EC; }
+
+  .check-row{
+    display:flex; gap:10px; align-items:flex-start; padding:10px 0; border-bottom:1px dashed var(--line);
+  }
+  .check-row:last-child{ border-bottom:none; }
+  .check-row input{ margin-top:3px; width:16px; height:16px; accent-color:var(--accent); flex:0 0 auto; }
+  .check-row .c-title{ font-weight:600; font-size:.88rem; }
+  .check-row .c-sub{ font-size:.78rem; color:var(--muted); }
+
+  /* ---------- readout (printer screen) ---------- */
+  .readout-panel{ position:sticky; top:20px; padding:20px; }
+  .screen{
+    background:var(--ink);
+    border-radius:9px;
+    padding:18px 18px 16px;
+    position:relative;
+    overflow:hidden;
+  }
+  .screen::before{
+    content:""; position:absolute; inset:0;
+    background-image:repeating-linear-gradient(rgba(255,255,255,.035) 0 1px, transparent 1px 4px);
+    pointer-events:none;
+  }
+  .screen-label{
+    font-family:'IBM Plex Mono',monospace; font-size:.68rem; letter-spacing:.12em;
+    text-transform:uppercase; color:#7FA0B8; margin-bottom:10px;
+  }
+  .screen-row{
+    display:flex; justify-content:space-between; gap:10px;
+    font-family:'IBM Plex Mono',monospace; font-size:.78rem; color:#DCE6EC;
+    padding:5px 0; border-bottom:1px solid rgba(255,255,255,.08);
+  }
+  .screen-row span:first-child{ color:#9FB2C1; padding-right:8px; }
+  .screen-row span:last-child{ white-space:nowrap; }
+  .screen-row.min-row span:last-child{ color:var(--accent); }
+  .screen-row.subtotal-row{
+    margin-top:4px; padding-top:9px; border-top:1px solid rgba(255,255,255,.18);
+    border-bottom-color:transparent;
+  }
+  .screen-row.subtotal-row span{ color:#EDF2F5; font-weight:600; }
+  .screen-total{
+    display:flex; justify-content:space-between; align-items:baseline;
+    margin-top:12px; padding-top:12px; border-top:1px solid rgba(255,255,255,.18);
+  }
+  .screen-total .tt-label{
+    font-family:'Space Grotesk',sans-serif; font-size:.78rem; letter-spacing:.08em;
+    text-transform:uppercase; color:#B9C3CC;
+  }
+  .screen-total .tt-value{
+    font-family:'IBM Plex Mono',monospace; font-weight:600; font-size:1.9rem; color:var(--accent);
+    transition:opacity .15s ease;
+  }
+  .screen-total .tt-value.pulse{ animation:pulse .35s ease; }
+  @keyframes pulse{ 0%{ opacity:.4; transform:translateY(1px);} 100%{ opacity:1; transform:translateY(0);} }
+
+  .btn{
+    width:100%; font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:.9rem;
+    letter-spacing:.02em; padding:12px 16px; border-radius:8px; border:none; cursor:pointer;
+    transition:transform .1s ease, box-shadow .15s ease, background .15s ease;
+  }
+  .btn:active{ transform:translateY(1px); }
+  .btn-primary{ background:var(--ink); color:#fff; margin-top:16px; }
+  .btn-primary:hover{ box-shadow:0 0 0 3px rgba(15,36,57,.15); }
+  .btn-primary:disabled{ background:#B9C3CC; cursor:not-allowed; }
+  .btn-ghost{ background:transparent; color:var(--ink); border:1.5px solid var(--line-strong); }
+  .btn-ghost:hover{ border-color:var(--ink); }
+  .form-note{ font-size:.76rem; color:var(--muted); margin-top:10px; text-align:center; }
+
+  /* ---------- invoice ---------- */
+  .invoice-wrap{ margin-top:24px; }
+  .invoice-wrap.hidden{ display:none; }
+  .invoice-sheet{
+    background:#fff; border:1px solid var(--line); border-radius:var(--radius);
+    padding:32px 34px; position:relative;
+  }
+  .invoice-sheet::before{
+    content:""; position:absolute; top:0; left:24px; right:24px; height:3px;
+    background-image:radial-gradient(circle,var(--line-strong) 1.4px,transparent 1.6px);
+    background-size:10px 3px; background-repeat:repeat-x;
+  }
+  .invoice-head{ display:flex; justify-content:space-between; gap:16px; flex-wrap:wrap; margin-bottom:22px; }
+  .invoice-org{ font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:1.15rem; }
+  .invoice-org-sub{ font-size:.82rem; color:var(--muted); }
+  .invoice-meta{ text-align:right; font-family:'IBM Plex Mono',monospace; font-size:.82rem; color:var(--muted); }
+  .invoice-meta div:first-child{ color:var(--ink); font-weight:600; }
+
+  .invoice-parties{
+    display:grid; grid-template-columns:repeat(3,1fr); gap:16px;
+    padding:16px 0; border-top:1px solid var(--line); border-bottom:1px solid var(--line); margin-bottom:20px;
+  }
+  .invoice-parties .p-label{ font-size:.7rem; letter-spacing:.08em; text-transform:uppercase; color:var(--muted); display:block; margin-bottom:3px; }
+  .invoice-parties div div{ font-weight:600; font-size:.92rem; }
+
+  table.invoice-table{ width:100%; border-collapse:collapse; margin-bottom:18px; }
+  table.invoice-table th{
+    text-align:left; font-size:.7rem; letter-spacing:.08em; text-transform:uppercase; color:var(--muted);
+    padding:0 0 8px; border-bottom:1.5px solid var(--ink);
+  }
+  table.invoice-table th.num, table.invoice-table td.num{ text-align:right; }
+  table.invoice-table td{ padding:9px 0; border-bottom:1px solid var(--line); font-size:.88rem; }
+  table.invoice-table tr.subtotal-row td{ font-weight:700; border-top:1.5px solid var(--ink); border-bottom-color:transparent; padding-top:12px; }
+  table.invoice-table td.num{ font-family:'IBM Plex Mono',monospace; white-space:nowrap; }
+  table.invoice-table tfoot td{ border-bottom:none; padding-top:14px; font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:1.15rem; }
+  table.invoice-table tfoot td.num{ font-family:'IBM Plex Mono',monospace; color:var(--accent-ink); }
+
+  .invoice-footnote p{ font-size:.82rem; color:var(--muted); margin:4px 0; }
+  .invoice-footnote .fine{ font-size:.72rem; }
+
+  .invoice-actions{ display:flex; gap:10px; margin-top:16px; }
+  .invoice-actions .btn{ width:auto; flex:1; }
+
+  /* ---------- print ---------- */
+  @media print{
+    body *{ visibility:hidden; }
+    .invoice-sheet, .invoice-sheet *{ visibility:visible; }
+    .invoice-sheet{ position:absolute; top:0; left:0; right:0; border:none; padding:0; margin:0; width:100%; }
+    .invoice-sheet::before{ display:none; }
+    .no-print{ display:none !important; }
+  }
+</style>
+</head>
+<body>
+
+<header class="app-header">
+  <div class="app-header-inner">
+    <div class="brand">
+      <span class="brand-mark">BRC</span>
+      <span class="brand-sub">Bambu H2C · 3D Print Service</span>
+    </div>
+    <h1>Print Price Calculator</h1>
+  </div>
+</header>
+
+<div class="wrap">
+  <div class="app-grid">
+
+    <!-- FORM -->
+    <form class="panel form-panel" id="quoteForm" onsubmit="return false;">
+
+      <fieldset class="section">
+        <legend><b>01</b> Job info</legend>
+        <div class="field">
+          <label class="f-label" for="custName">Customer / requester name</label>
+          <input type="text" id="custName" placeholder="e.g., Jamie Lopez">
+        </div>
+        <div class="field">
+          <label class="f-label" for="jobDesc">Print job / item description</label>
+          <input type="text" id="jobDesc" placeholder="e.g., sensor housing, dual-color">
+        </div>
+        <div class="field">
+          <label class="f-label" for="quoteDate">Date</label>
+          <input type="date" id="quoteDate">
+        </div>
+      </fieldset>
+
+      <fieldset class="section">
+        <legend><b>02</b> Pricing tier</legend>
+        <div class="tier-cards" id="tierCards">
+          <label class="tier-card" data-tier="1">
+            <input type="radio" name="tier" value="1" checked>
+            <div>
+              <div class="t-title">Tier 1 — BRC personnel</div>
+              <div class="t-sub">At cost: filament × 1.3 + $1 setup. No margin, no minimum.</div>
+            </div>
+          </label>
+          <label class="tier-card" data-tier="2">
+            <input type="radio" name="tier" value="2">
+            <div>
+              <div class="t-title">Tier 2 — USU-affiliated</div>
+              <div class="t-sub">Modest margin: filament × 2.0 + $1/hr + $5 labor. $5 minimum.</div>
+            </div>
+          </label>
+          <label class="tier-card" data-tier="3">
+            <input type="radio" name="tier" value="3">
+            <div>
+              <div class="t-title">Tier 3 — External / public</div>
+              <div class="t-sub">Full margin: filament × 2.5 + $1/hr + $5 labor. $5 minimum.</div>
+            </div>
+          </label>
+        </div>
+      </fieldset>
+
+      <fieldset class="section">
+        <legend><b>03</b> Print specs</legend>
+        <div class="field">
+          <label class="f-label" for="material">Material</label>
+          <select id="material"></select>
+          <div class="material-note" id="materialNote"></div>
+        </div>
+        <div class="row2">
+          <div class="field">
+            <label class="f-label" for="grams">Weight (grams)</label>
+            <input type="number" id="grams" min="0" step="0.1" placeholder="e.g., 50">
+          </div>
+          <div class="field">
+            <label class="f-label" for="hours">Print time (hours)</label>
+            <input type="number" id="hours" min="0" step="0.1" placeholder="e.g., 4">
+          </div>
+        </div>
+        <div class="field">
+          <label class="f-label" for="colors">Colors used</label>
+          <select id="colors">
+            <option value="1">1–2 colors — no surcharge (dual-nozzle)</option>
+            <option value="2">3–4 colors — +10% filament (AMS swapping)</option>
+            <option value="3">5–6 colors — +20% filament (both AMS active)</option>
+          </select>
+        </div>
+      </fieldset>
+
+      <fieldset class="section">
+        <legend><b>04</b> Special handling</legend>
+        <label class="check-row">
+          <input type="checkbox" id="abrasive">
+          <div>
+            <div class="c-title">Abrasive material — +$5</div>
+            <div class="c-sub">CF/GF blends, glow-in-dark, glitter, metal-fill. Covers nozzle wear.</div>
+          </div>
+        </label>
+        <label class="check-row">
+          <input type="checkbox" id="drying">
+          <div>
+            <div class="c-title">Requires pre-print drying — +$3</div>
+            <div class="c-sub">TPU, PET-CF, PA/PVA. Adds 8–12h to turnaround.</div>
+          </div>
+        </label>
+      </fieldset>
+    </form>
+
+    <!-- READOUT -->
+    <aside class="panel readout-panel">
+      <div class="screen">
+        <div class="screen-label">// live price readout</div>
+        <div id="screenLines"></div>
+        <div class="screen-total">
+          <span class="tt-label">Total</span>
+          <span class="tt-value" id="outTotal">$0.00</span>
+        </div>
+      </div>
+      <button class="btn btn-primary" id="generateBtn">Generate invoice</button>
+      <div class="form-note">Includes Vernal, UT sales tax and card processing fee.</div>
+    </aside>
+
+  </div>
+
+  <!-- INVOICE -->
+  <div class="invoice-wrap hidden" id="invoiceWrap">
+    <div class="invoice-sheet" id="invoiceSheet">
+      <div class="invoice-head">
+        <div>
+          <div class="invoice-org">Bingham Research Center</div>
+          <div class="invoice-org-sub">Bambu H2C · 3D Print Service</div>
+        </div>
+        <div class="invoice-meta">
+          <div id="invNumber">Quote #—</div>
+          <div id="invDate">—</div>
+        </div>
+      </div>
+      <div class="invoice-parties">
+        <div><span class="p-label">Prepared for</span><div id="invCustomer">—</div></div>
+        <div><span class="p-label">Item</span><div id="invJob">—</div></div>
+        <div><span class="p-label">Tier</span><div id="invTier">—</div></div>
+      </div>
+      <table class="invoice-table">
+        <thead><tr><th>Description</th><th class="num">Amount</th></tr></thead>
+        <tbody id="invLines"></tbody>
+        <tfoot><tr><td>Total</td><td class="num" id="invTotal">$0.00</td></tr></tfoot>
+      </table>
+      <div class="invoice-footnote">
+        <p>Quote is an estimate based on sliced weight and print time; final price is confirmed at pickup.</p>
+        <p class="fine">Total includes Vernal, UT sales tax and card processing fee. Questions: Bingham Research Center, 320 North Aggie Blvd, Vernal, UT 84078 · (435) 722-1740.</p>
+      </div>
+    </div>
+    <div class="invoice-actions no-print">
+      <button class="btn btn-primary" id="printBtn">Print / save as PDF</button>
+      <button class="btn btn-ghost" id="newQuoteBtn">Start new quote</button>
+    </div>
+  </div>
+
+</div>
+
+<script>
+//<![CDATA[
+(function(){
+  "use strict";
+
+  /* ============ EDITABLE PRICING DATA ============ */
+  var MATERIALS = [
+    { id:'pla',     name:'PLA Basic',            kgPrice:22.99, note:'Default' },
+    { id:'petg',    name:'PETG Basic (refill)',  kgPrice:19.99, note:'Durable, outdoor' },
+    { id:'abs',     name:'ABS',                  kgPrice:24.99, note:'Heat resistant' },
+    { id:'petg_hf', name:'PETG HF',              kgPrice:32.99, note:'High-flow PETG' },
+    { id:'petcf',   name:'PET-CF',               kgPrice:59.99, note:'CF nozzle required — abrasive, needs drying' },
+    { id:'tpu',     name:'TPU for AMS',          kgPrice:34.99, note:'Flexible, finicky — needs drying' }
+  ];
+
+  var TIERS = {
+    1: { label:'Tier 1 — BRC personnel', shortLabel:'BRC personnel (at cost)', filamentMult:1.3, hourlyRate:0,   labor:0,    setup:1.00, minCharge:0 },
+    2: { label:'Tier 2 — USU-affiliated', shortLabel:'USU-affiliated',          filamentMult:2.0, hourlyRate:1.00, labor:5.00, setup:0,    minCharge:5.00 },
+    3: { label:'Tier 3 — External / public', shortLabel:'External / public',    filamentMult:2.5, hourlyRate:1.00, labor:5.00, setup:0,    minCharge:5.00 }
+  };
+
+  var COLOR_OPTIONS = {
+    '1': { mult:1.00, label:'1–2 colors' },
+    '2': { mult:1.10, label:'3–4 colors (+10% filament)' },
+    '3': { mult:1.20, label:'5–6 colors (+20% filament)' }
+  };
+
+  // Sales tax: Vernal, UT combined rate (state 4.85% + local) per the Utah
+  // State Tax Commission rate chart, effective 4/1/2026. Uintah County's
+  // unincorporated rate is lower (6.45%); Vernal city — where BRC sits —
+  // is 6.95%. Confirm current rate + taxable base with USU/BRC finance
+  // before relying on this for real invoices: https://tax.utah.gov/sales/rates
+  var TAX_RATE = 0.0695;
+
+  // Card processing fee, applied to all three tiers per BRC policy.
+  var PROCESSING_FEE_RATE = 0.05;
+  /* ================================================ */
+
+  var $ = function(id){ return document.getElementById(id); };
+  var money = function(n){ return '$' + n.toFixed(2); };
+
+  var materialSelect = $('material');
+  MATERIALS.forEach(function(m){
+    var opt = document.createElement('option');
+    opt.value = m.id;
+    opt.textContent = m.name + ' — $' + (m.kgPrice/1000).toFixed(3) + '/g';
+    materialSelect.appendChild(opt);
+  });
+
+  function getMaterial(){
+    return MATERIALS.filter(function(m){ return m.id === materialSelect.value; })[0] || MATERIALS[0];
+  }
+
+  function updateMaterialNote(){
+    var m = getMaterial();
+    $('materialNote').innerHTML = '<strong>' + m.note + '</strong>';
+  }
+
+  function updateTierCardStyles(){
+    document.querySelectorAll('.tier-card').forEach(function(card){
+      var input = card.querySelector('input');
+      card.classList.toggle('active', input.checked);
+    });
+  }
+
+  function getTierNum(){
+    var checked = document.querySelector('input[name="tier"]:checked');
+    return checked ? parseInt(checked.value, 10) : 1;
+  }
+
+  function calculate(){
+    var material = getMaterial();
+    var pricePerGram = material.kgPrice / 1000;
+    var grams = parseFloat($('grams').value) || 0;
+    var hours = parseFloat($('hours').value) || 0;
+    var tierNum = getTierNum();
+    var tier = TIERS[tierNum];
+    var colorOpt = COLOR_OPTIONS[$('colors').value] || COLOR_OPTIONS['1'];
+    var abrasive = $('abrasive').checked;
+    var drying = $('drying').checked;
+
+    var baseFilament = grams * pricePerGram;
+    var colorSurchargeAmt = baseFilament * (colorOpt.mult - 1);
+    var adjFilament = baseFilament * colorOpt.mult;
+
+    var tierFilamentCost = adjFilament * tier.filamentMult;
+    var timeFee = hours * tier.hourlyRate;
+    var laborFee = tier.labor;
+    var setupFee = tier.setup;
+    var abrasiveFee = abrasive ? 5.00 : 0;
+    var dryingFee = drying ? 3.00 : 0;
+
+    var costSubtotal = tierFilamentCost + timeFee + laborFee + setupFee + abrasiveFee + dryingFee;
+    var minApplied = false;
+    if (tier.minCharge > 0 && costSubtotal < tier.minCharge){
+      minApplied = true;
+      costSubtotal = tier.minCharge;
+    }
+
+    var salesTax = costSubtotal * TAX_RATE;
+    var processingFee = (costSubtotal + salesTax) * PROCESSING_FEE_RATE;
+    var grandTotal = costSubtotal + salesTax + processingFee;
+
+    return {
+      material: material, pricePerGram: pricePerGram, grams: grams, hours: hours,
+      tier: tier, tierNum: tierNum, colorOpt: colorOpt, abrasive: abrasive, drying: drying,
+      baseFilament: baseFilament, colorSurchargeAmt: colorSurchargeAmt,
+      tierFilamentCost: tierFilamentCost, timeFee: timeFee, laborFee: laborFee,
+      setupFee: setupFee, abrasiveFee: abrasiveFee, dryingFee: dryingFee,
+      minApplied: minApplied, costSubtotal: costSubtotal,
+      salesTax: salesTax, processingFee: processingFee, grandTotal: grandTotal
+    };
+  }
+
+  function buildLines(c){
+    var lines = [];
+    lines.push({ label: 'Filament — ' + c.grams + 'g × $' + c.pricePerGram.toFixed(3) + '/g (' + c.material.name + ')', value: c.baseFilament });
+    if (c.colorOpt.mult !== 1){
+      lines.push({ label: 'Color surcharge — ' + c.colorOpt.label, value: c.colorSurchargeAmt });
+    }
+    lines.push({ label: 'Tier markup — ' + c.tier.shortLabel + ' (×' + c.tier.filamentMult + ' filament)', value: c.tierFilamentCost - (c.baseFilament + c.colorSurchargeAmt) });
+    if (c.tier.hourlyRate > 0){
+      lines.push({ label: 'Print time — ' + c.hours + 'h × $1.00/h', value: c.timeFee });
+    }
+    if (c.tier.labor > 0){
+      lines.push({ label: 'Labor (slicing, load, cleanup)', value: c.laborFee });
+    }
+    if (c.tier.setup > 0){
+      lines.push({ label: 'Setup', value: c.setupFee });
+    }
+    if (c.abrasive){
+      lines.push({ label: 'Abrasive material surcharge', value: c.abrasiveFee });
+    }
+    if (c.drying){
+      lines.push({ label: 'Pre-print drying surcharge', value: c.dryingFee });
+    }
+    if (c.minApplied){
+      lines.push({ label: 'Minimum charge floor ($' + c.tier.minCharge.toFixed(2) + ' for this tier)', value: null, isMin: true });
+    }
+    lines.push({ label: 'Subtotal', value: c.costSubtotal, isSubtotal: true });
+    lines.push({ label: 'Sales tax — Vernal, UT (' + (TAX_RATE * 100).toFixed(2) + '%)', value: c.salesTax });
+    lines.push({ label: 'Card processing fee (' + (PROCESSING_FEE_RATE * 100).toFixed(0) + '%)', value: c.processingFee });
+    return lines;
+  }
+
+  var lastTotal = null;
+
+  function renderReadout(){
+    var c = calculate();
+    var lines = buildLines(c);
+    var html = '';
+    lines.forEach(function(l){
+      var rowClass = 'screen-row';
+      if (l.isMin) rowClass += ' min-row';
+      if (l.isSubtotal) rowClass += ' subtotal-row';
+      var valueText = l.isMin ? 'applied' : money(l.value);
+      html += '<div class="' + rowClass + '"><span>' + l.label + '</span><span>' + valueText + '</span></div>';
+    });
+    $('screenLines').innerHTML = html;
+
+    var totalEl = $('outTotal');
+    totalEl.textContent = money(c.grandTotal);
+    if (lastTotal !== null && lastTotal !== c.grandTotal){
+      totalEl.classList.remove('pulse');
+      void totalEl.offsetWidth;
+      totalEl.classList.add('pulse');
+    }
+    lastTotal = c.grandTotal;
+
+    var ready = c.grams > 0 && $('custName').value.trim() !== '' && $('jobDesc').value.trim() !== '';
+    $('generateBtn').disabled = !ready;
+
+    return c;
+  }
+
+  function generateQuoteNumber(){
+    var d = new Date();
+    var yy = String(d.getFullYear()).slice(2);
+    var mm = String(d.getMonth() + 1).padStart(2, '0');
+    var dd = String(d.getDate()).padStart(2, '0');
+    var rand = Math.floor(100 + Math.random() * 900);
+    return 'BRC-' + yy + mm + dd + '-' + rand;
+  }
+
+  function generateInvoice(){
+    var c = calculate();
+    var lines = buildLines(c);
+
+    $('invNumber').textContent = 'Quote #' + generateQuoteNumber();
+    var d = $('quoteDate').value ? new Date($('quoteDate').value + 'T00:00:00') : new Date();
+    $('invDate').textContent = d.toLocaleDateString('en-US', { year:'numeric', month:'long', day:'numeric' });
+
+    $('invCustomer').textContent = $('custName').value.trim();
+    $('invJob').textContent = $('jobDesc').value.trim();
+    $('invTier').textContent = c.tier.label;
+
+    var tbody = $('invLines');
+    tbody.innerHTML = '';
+    lines.forEach(function(l){
+      var tr = document.createElement('tr');
+      if (l.isSubtotal) tr.className = 'subtotal-row';
+      var tdLabel = document.createElement('td');
+      tdLabel.textContent = l.label;
+      var tdVal = document.createElement('td');
+      tdVal.className = 'num';
+      tdVal.textContent = l.isMin ? 'applied' : money(l.value);
+      tr.appendChild(tdLabel);
+      tr.appendChild(tdVal);
+      tbody.appendChild(tr);
+    });
+
+    $('invTotal').textContent = money(c.grandTotal);
+
+    $('invoiceWrap').classList.remove('hidden');
+    if (typeof $('invoiceWrap').scrollIntoView === 'function'){
+      $('invoiceWrap').scrollIntoView({ behavior:'smooth', block:'start' });
+    }
+  }
+
+  /* ---- wire up events ---- */
+  ['grams','hours','custName','jobDesc'].forEach(function(id){
+    $(id).addEventListener('input', renderReadout);
+  });
+  ['colors'].forEach(function(id){
+    $(id).addEventListener('change', renderReadout);
+  });
+  ['abrasive','drying'].forEach(function(id){
+    $(id).addEventListener('change', renderReadout);
+  });
+  materialSelect.addEventListener('change', function(){
+    updateMaterialNote();
+    renderReadout();
+  });
+  document.querySelectorAll('input[name="tier"]').forEach(function(radio){
+    radio.addEventListener('change', function(){
+      updateTierCardStyles();
+      renderReadout();
+    });
+  });
+
+  $('generateBtn').addEventListener('click', generateInvoice);
+  $('printBtn').addEventListener('click', function(){ window.print(); });
+  $('newQuoteBtn').addEventListener('click', function(){
+    $('invoiceWrap').classList.add('hidden');
+    window.scrollTo({ top:0, behavior:'smooth' });
+  });
+
+  /* ---- init ---- */
+  $('quoteDate').valueAsDate = new Date();
+  updateMaterialNote();
+  updateTierCardStyles();
+  renderReadout();
+
+})();
+//]]>
+</script>
+
+</body>
+</html>
