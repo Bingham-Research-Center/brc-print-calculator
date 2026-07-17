@@ -38,9 +38,10 @@
 
   UPDATING PRICES LATER
   ______________________
-  All editable numbers live in the MATERIALS / TIERS / COLOR_OPTIONS
-  constants near the top of the <script> block below. Change a number
-  there and the whole tool (live readout + invoice) updates automatically.
+  All editable numbers live in the MATERIALS (per-gram rates by tier),
+  TIERS, and COLOR_OPTIONS constants near the top of the <script> block
+  below. Change a number there and the whole tool (live readout +
+  invoice) updates automatically.
 -->
 <html lang="en">
 <head>
@@ -353,25 +354,25 @@
       <fieldset class="section">
         <legend><b>02</b> Pricing tier</legend>
         <div class="tier-cards" id="tierCards">
-          <label class="tier-card" data-tier="1">
-            <input type="radio" name="tier" value="1" checked>
+          <label class="tier-card" data-tier="1" id="brcTierCard">
+            <input type="radio" name="tier" value="1">
             <div>
-              <div class="t-title">Tier 1 — BRC personnel</div>
-              <div class="t-sub">At cost: filament × 1.3 + $1 setup. No margin, no minimum.</div>
+              <div class="t-title">BRC personnel</div>
+              <div class="t-sub">Internal rate for BRC lab and project prints.</div>
             </div>
           </label>
           <label class="tier-card" data-tier="2">
             <input type="radio" name="tier" value="2">
             <div>
-              <div class="t-title">Tier 2 — USU-affiliated</div>
-              <div class="t-sub">Modest margin: filament × 2.0 + $1/hr + $5 labor. $5 minimum.</div>
+              <div class="t-title">USU-affiliated</div>
+              <div class="t-sub">Discounted rate for USU students, faculty, and staff. $5 minimum.</div>
             </div>
           </label>
           <label class="tier-card" data-tier="3">
-            <input type="radio" name="tier" value="3">
+            <input type="radio" name="tier" value="3" checked>
             <div>
-              <div class="t-title">Tier 3 — External / public</div>
-              <div class="t-sub">Full margin: filament × 2.5 + $1/hr + $5 labor. $5 minimum.</div>
+              <div class="t-title">External / public</div>
+              <div class="t-sub">Standard rate for community and business jobs. $5 minimum.</div>
             </div>
           </label>
         </div>
@@ -493,19 +494,20 @@
   "use strict";
 
   /* ============ EDITABLE PRICING DATA ============ */
+  // Per-gram filament rates by pricing tier (1 = BRC, 2 = USU, 3 = external).
   var MATERIALS = [
-    { id:'pla',     name:'PLA Basic',            kgPrice:22.99, note:'Default' },
-    { id:'petg',    name:'PETG Basic (refill)',  kgPrice:19.99, note:'Durable, outdoor' },
-    { id:'abs',     name:'ABS',                  kgPrice:24.99, note:'Heat resistant' },
-    { id:'petg_hf', name:'PETG HF',              kgPrice:32.99, note:'High-flow PETG' },
-    { id:'petcf',   name:'PET-CF',               kgPrice:59.99, note:'CF nozzle required — abrasive, needs drying' },
-    { id:'tpu',     name:'TPU for AMS',          kgPrice:34.99, note:'Flexible, finicky — needs drying' }
+    { id:'pla',     name:'PLA Basic',           rates:{ 1:0.0299, 2:0.0460, 3:0.0575 }, note:'Default' },
+    { id:'petg',    name:'PETG Basic (refill)', rates:{ 1:0.0260, 2:0.0400, 3:0.0500 }, note:'Durable, outdoor' },
+    { id:'abs',     name:'ABS',                 rates:{ 1:0.0325, 2:0.0500, 3:0.0625 }, note:'Heat resistant' },
+    { id:'petg_hf', name:'PETG HF',             rates:{ 1:0.0429, 2:0.0660, 3:0.0825 }, note:'High-flow PETG' },
+    { id:'petcf',   name:'PET-CF',              rates:{ 1:0.0780, 2:0.1200, 3:0.1500 }, note:'CF nozzle required — abrasive, needs drying' },
+    { id:'tpu',     name:'TPU for AMS',         rates:{ 1:0.0455, 2:0.0700, 3:0.0875 }, note:'Flexible, finicky — needs drying' }
   ];
 
   var TIERS = {
-    1: { label:'Tier 1 — BRC personnel', shortLabel:'BRC personnel (at cost)', filamentMult:1.3, hourlyRate:0,   labor:0,    setup:1.00, minCharge:0 },
-    2: { label:'Tier 2 — USU-affiliated', shortLabel:'USU-affiliated',          filamentMult:2.0, hourlyRate:1.00, labor:5.00, setup:0,    minCharge:5.00 },
-    3: { label:'Tier 3 — External / public', shortLabel:'External / public',    filamentMult:2.5, hourlyRate:1.00, labor:5.00, setup:0,    minCharge:5.00 }
+    1: { label:'BRC personnel',     hourlyRate:0,    labor:0,    setup:1.00, minCharge:0 },
+    2: { label:'USU-affiliated',    hourlyRate:1.00, labor:5.00, setup:0,    minCharge:5.00 },
+    3: { label:'External / public', hourlyRate:1.00, labor:5.00, setup:0,    minCharge:5.00 }
   };
 
   var COLOR_OPTIONS = {
@@ -529,13 +531,23 @@
   var money = function(n){ return '$' + n.toFixed(2); };
   var scrollMode = (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) ? 'auto' : 'smooth';
 
+  // Staff quoting view: append ?brc to the URL to show the internal BRC tier.
+  var staffMode = /[?&#]brc\b/.test(window.location.href);
+  if (!staffMode){ $('brcTierCard').style.display = 'none'; }
+
   var materialSelect = $('material');
   MATERIALS.forEach(function(m){
     var opt = document.createElement('option');
     opt.value = m.id;
-    opt.textContent = m.name + ' — $' + (m.kgPrice/1000).toFixed(3) + '/g';
     materialSelect.appendChild(opt);
   });
+
+  function fillMaterialOptions(){
+    var tierNum = getTierNum();
+    MATERIALS.forEach(function(m, i){
+      materialSelect.options[i].textContent = m.name + ' — $' + m.rates[tierNum].toFixed(4) + '/g';
+    });
+  }
 
   function getMaterial(){
     return MATERIALS.filter(function(m){ return m.id === materialSelect.value; })[0] || MATERIALS[0];
@@ -555,16 +567,16 @@
 
   function getTierNum(){
     var checked = document.querySelector('input[name="tier"]:checked');
-    return checked ? parseInt(checked.value, 10) : 1;
+    return checked ? parseInt(checked.value, 10) : 3;
   }
 
   function calculate(){
     var material = getMaterial();
-    var pricePerGram = material.kgPrice / 1000;
-    var grams = parseFloat($('grams').value) || 0;
-    var hours = parseFloat($('hours').value) || 0;
     var tierNum = getTierNum();
     var tier = TIERS[tierNum];
+    var pricePerGram = material.rates[tierNum];
+    var grams = parseFloat($('grams').value) || 0;
+    var hours = parseFloat($('hours').value) || 0;
     var colorOpt = COLOR_OPTIONS[$('colors').value] || COLOR_OPTIONS['1'];
     var abrasive = $('abrasive').checked;
     var drying = $('drying').checked;
@@ -573,14 +585,13 @@
     var colorSurchargeAmt = baseFilament * (colorOpt.mult - 1);
     var adjFilament = baseFilament * colorOpt.mult;
 
-    var tierFilamentCost = adjFilament * tier.filamentMult;
     var timeFee = hours * tier.hourlyRate;
     var laborFee = tier.labor;
     var setupFee = tier.setup;
     var abrasiveFee = abrasive ? 5.00 : 0;
     var dryingFee = drying ? 3.00 : 0;
 
-    var costSubtotal = tierFilamentCost + timeFee + laborFee + setupFee + abrasiveFee + dryingFee;
+    var costSubtotal = adjFilament + timeFee + laborFee + setupFee + abrasiveFee + dryingFee;
     var minApplied = false;
     if (tier.minCharge > 0 && costSubtotal < tier.minCharge){
       minApplied = true;
@@ -595,7 +606,7 @@
       material: material, pricePerGram: pricePerGram, grams: grams, hours: hours,
       tier: tier, tierNum: tierNum, colorOpt: colorOpt, abrasive: abrasive, drying: drying,
       baseFilament: baseFilament, colorSurchargeAmt: colorSurchargeAmt,
-      tierFilamentCost: tierFilamentCost, timeFee: timeFee, laborFee: laborFee,
+      timeFee: timeFee, laborFee: laborFee,
       setupFee: setupFee, abrasiveFee: abrasiveFee, dryingFee: dryingFee,
       minApplied: minApplied, costSubtotal: costSubtotal,
       salesTax: salesTax, processingFee: processingFee, grandTotal: grandTotal
@@ -604,13 +615,12 @@
 
   function buildLines(c){
     var lines = [];
-    lines.push({ label: 'Filament — ' + c.grams + 'g × $' + c.pricePerGram.toFixed(3) + '/g (' + c.material.name + ')', value: c.baseFilament });
+    lines.push({ label: 'Filament — ' + c.grams + 'g × $' + c.pricePerGram.toFixed(4) + '/g (' + c.material.name + ')', value: c.baseFilament });
     if (c.colorOpt.mult !== 1){
       lines.push({ label: 'Color surcharge — ' + c.colorOpt.label, value: c.colorSurchargeAmt });
     }
-    lines.push({ label: 'Tier markup — ' + c.tier.shortLabel + ' (×' + c.tier.filamentMult + ' filament)', value: c.tierFilamentCost - (c.baseFilament + c.colorSurchargeAmt) });
     if (c.tier.hourlyRate > 0){
-      lines.push({ label: 'Print time — ' + c.hours + 'h × $1.00/h', value: c.timeFee });
+      lines.push({ label: 'Print time — ' + c.hours + 'h × $' + c.tier.hourlyRate.toFixed(2) + '/h', value: c.timeFee });
     }
     if (c.tier.labor > 0){
       lines.push({ label: 'Labor (slicing, load, cleanup)', value: c.laborFee });
@@ -625,7 +635,7 @@
       lines.push({ label: 'Pre-print drying surcharge', value: c.dryingFee });
     }
     if (c.minApplied){
-      lines.push({ label: 'Minimum charge floor ($' + c.tier.minCharge.toFixed(2) + ' for this tier)', value: null, isMin: true });
+      lines.push({ label: 'Minimum charge ($' + c.tier.minCharge.toFixed(2) + ')', value: null, isMin: true });
     }
     lines.push({ label: 'Subtotal', value: c.costSubtotal, isSubtotal: true });
     lines.push({ label: 'Sales tax — Vernal, UT (' + (TAX_RATE * 100).toFixed(2) + '%)', value: c.salesTax });
@@ -771,6 +781,7 @@
   document.querySelectorAll('input[name="tier"]').forEach(function(radio){
     radio.addEventListener('change', function(){
       updateTierCardStyles();
+      fillMaterialOptions();
       renderReadout();
     });
   });
@@ -979,6 +990,7 @@
 
   /* ---- init ---- */
   $('quoteDate').valueAsDate = new Date();
+  fillMaterialOptions();
   updateMaterialNote();
   updateTierCardStyles();
   renderReadout();
