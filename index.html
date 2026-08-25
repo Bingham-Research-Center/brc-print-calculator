@@ -365,14 +365,14 @@
             <input type="radio" name="tier" value="2">
             <div>
               <div class="t-title">USU-affiliated</div>
-              <div class="t-sub">Discounted rate for USU students, faculty, and staff. $5 minimum.</div>
+              <div class="t-sub">Discounted rate for USU students, faculty, and staff. $15 minimum.</div>
             </div>
           </label>
           <label class="tier-card" data-tier="3">
             <input type="radio" name="tier" value="3" checked>
             <div>
               <div class="t-title">External / public</div>
-              <div class="t-sub">Standard rate for community and business jobs. $5 minimum.</div>
+              <div class="t-sub">Standard rate for community and business jobs. $15 minimum.</div>
             </div>
           </label>
         </div>
@@ -419,6 +419,13 @@
           <div>
             <div class="c-title">Requires pre-print drying — +$3</div>
             <div class="c-sub">TPU, PET-CF, PA/PVA. Adds 8–12h to turnaround.</div>
+          </div>
+        </label>
+        <label class="check-row">
+          <input type="checkbox" id="supports">
+          <div>
+            <div class="c-title">Needs supports / support removal — +$10</div>
+            <div class="c-sub">Overhangs, bridges, multi-part assemblies. Covers extra post-processing time.</div>
           </div>
         </label>
       </fieldset>
@@ -505,9 +512,9 @@
   ];
 
   var TIERS = {
-    1: { label:'BRC personnel',     hourlyRate:0,    labor:0,    setup:1.00, minCharge:0 },
-    2: { label:'USU-affiliated',    hourlyRate:1.00, labor:5.00, setup:0,    minCharge:5.00 },
-    3: { label:'External / public', hourlyRate:1.00, labor:5.00, setup:0,    minCharge:5.00 }
+    1: { label:'BRC personnel',     hourlyRate:0,    labor:0,     setup:1.00, minCharge:0 },
+    2: { label:'USU-affiliated',    hourlyRate:5.00, labor:10.00, setup:0,    minCharge:15.00 },
+    3: { label:'External / public', hourlyRate:5.00, labor:10.00, setup:0,    minCharge:15.00 }
   };
 
   var COLOR_OPTIONS = {
@@ -580,6 +587,7 @@
     var colorOpt = COLOR_OPTIONS[$('colors').value] || COLOR_OPTIONS['1'];
     var abrasive = $('abrasive').checked;
     var drying = $('drying').checked;
+    var supports = $('supports').checked;
 
     var baseFilament = grams * pricePerGram;
     var colorSurchargeAmt = baseFilament * (colorOpt.mult - 1);
@@ -590,8 +598,9 @@
     var setupFee = tier.setup;
     var abrasiveFee = abrasive ? 5.00 : 0;
     var dryingFee = drying ? 3.00 : 0;
+    var supportsFee = supports ? 10.00 : 0;
 
-    var costSubtotal = adjFilament + timeFee + laborFee + setupFee + abrasiveFee + dryingFee;
+    var costSubtotal = adjFilament + timeFee + laborFee + setupFee + abrasiveFee + dryingFee + supportsFee;
     var minApplied = false;
     if (tier.minCharge > 0 && costSubtotal < tier.minCharge){
       minApplied = true;
@@ -605,9 +614,10 @@
     return {
       material: material, pricePerGram: pricePerGram, grams: grams, hours: hours,
       tier: tier, tierNum: tierNum, colorOpt: colorOpt, abrasive: abrasive, drying: drying,
+      supports: supports,
       baseFilament: baseFilament, colorSurchargeAmt: colorSurchargeAmt,
       timeFee: timeFee, laborFee: laborFee,
-      setupFee: setupFee, abrasiveFee: abrasiveFee, dryingFee: dryingFee,
+      setupFee: setupFee, abrasiveFee: abrasiveFee, dryingFee: dryingFee, supportsFee: supportsFee,
       minApplied: minApplied, costSubtotal: costSubtotal,
       salesTax: salesTax, processingFee: processingFee, grandTotal: grandTotal
     };
@@ -623,7 +633,7 @@
       lines.push({ label: 'Print time — ' + c.hours + 'h × $' + c.tier.hourlyRate.toFixed(2) + '/h', value: c.timeFee });
     }
     if (c.tier.labor > 0){
-      lines.push({ label: 'Labor (slicing, load, cleanup)', value: c.laborFee });
+      lines.push({ label: 'Labor (review, load, monitor, cleanup)', value: c.laborFee });
     }
     if (c.tier.setup > 0){
       lines.push({ label: 'Setup', value: c.setupFee });
@@ -633,6 +643,9 @@
     }
     if (c.drying){
       lines.push({ label: 'Pre-print drying surcharge', value: c.dryingFee });
+    }
+    if (c.supports){
+      lines.push({ label: 'Supports / complex geometry surcharge', value: c.supportsFee });
     }
     if (c.minApplied){
       lines.push({ label: 'Minimum charge ($' + c.tier.minCharge.toFixed(2) + ')', value: null, isMin: true });
@@ -771,7 +784,7 @@
   ['colors'].forEach(function(id){
     $(id).addEventListener('change', renderReadout);
   });
-  ['abrasive','drying'].forEach(function(id){
+  ['abrasive','drying','supports'].forEach(function(id){
     $(id).addEventListener('change', renderReadout);
   });
   materialSelect.addEventListener('change', function(){
