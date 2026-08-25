@@ -42,6 +42,9 @@
   TIERS, and COLOR_OPTIONS constants near the top of the <script> block
   below. Change a number there and the whole tool (live readout +
   invoice) updates automatically.
+  The optional model-file estimate (STL / 3MF / OBJ) is driven by the
+  EST constants and the density / flow fields in MATERIALS; see the
+  README for how to calibrate them against real slices.
 -->
 <html lang="en">
 <head>
@@ -163,6 +166,17 @@
   .check-row input{ margin-top:3px; width:16px; height:16px; accent-color:var(--accent); flex:0 0 auto; }
   .check-row .c-title{ font-weight:600; font-size:.88rem; }
   .check-row .c-sub{ font-size:.78rem; color:var(--muted); }
+
+  /* model file drop zone */
+  .drop{
+    display:block; position:relative; cursor:pointer; text-align:center; padding:14px 12px;
+    border:1.5px dashed var(--line-strong); border-radius:7px; background:#fff;
+    transition:border-color .15s ease, background .15s ease;
+  }
+  .drop:hover, .drop.over{ border-color:var(--accent); background:#FFF6EC; }
+  .drop input{ position:absolute; width:1px; height:1px; opacity:0; }
+  .drop .d-main{ display:block; font-weight:600; font-size:.88rem; }
+  .drop .d-sub{ display:block; font-size:.76rem; color:var(--muted); margin-top:3px; }
 
   /* ---------- readout (printer screen) ---------- */
   .readout-panel{ position:sticky; top:20px; padding:20px; }
@@ -301,7 +315,7 @@
 
   /* ---------- a11y / motion ---------- */
   .btn:focus-visible{ outline:2.5px solid var(--sky); outline-offset:2px; }
-  .tier-card:focus-within, .check-row:focus-within{ outline:2.5px solid var(--sky); outline-offset:2px; border-radius:9px; }
+  .tier-card:focus-within, .check-row:focus-within, .drop:focus-within{ outline:2.5px solid var(--sky); outline-offset:2px; border-radius:9px; }
   @media (prefers-reduced-motion: reduce){
     .st-dot, .screen-label::after, .tt-value.pulse{ animation:none; }
     .btn, .tier-card, input, select{ transition:none; }
@@ -380,6 +394,15 @@
 
       <fieldset class="section">
         <legend><b>03</b> Print specs</legend>
+        <div class="field">
+          <label class="f-label" for="modelFile">Model or sliced file (optional)</label>
+          <label class="drop" id="dropZone">
+            <input type="file" id="modelFile" multiple accept=".stl,.3mf,.obj,.gcode">
+            <span class="d-main">Drop files here or click to choose</span>
+            <span class="d-sub">STL / 3MF / OBJ for an estimate · Bambu Studio .gcode or sliced .3mf for exact numbers</span>
+          </label>
+          <div class="hint" id="modelStatus" role="status"></div>
+        </div>
         <div class="field">
           <label class="f-label" for="material">Material</label>
           <select id="material"></select>
@@ -497,18 +520,251 @@
 
 <script>
 //<![CDATA[
+/* BRC_MODEL_START */
+// File readers + estimate model. Pure functions, no DOM. test/model.test.mjs
+// extracts this block from index.html and runs it under Node.
+var BRCModel = (function(){
+  "use strict";
+
+  /* ---- zip reader (stored + deflate entries) ---- */
+  function readZip(buf){
+    var dv = new DataView(buf), u8 = new Uint8Array(buf), dec = new TextDecoder(), eocd = -1;
+    for (var i = buf.byteLength - 22; i >= Math.max(0, buf.byteLength - 66000); i--){
+      if (dv.getUint32(i, true) === 0x06054b50){ eocd = i; break; }
+    }
+    if (eocd < 0) throw new Error('not a zip file');
+    var entries = {}, p = dv.getUint32(eocd + 16, true);
+    for (var n = dv.getUint16(eocd + 10, true); n > 0 && dv.getUint32(p, true) === 0x02014b50; n--){
+      var nameLen = dv.getUint16(p + 28, true);
+      var name = dec.decode(u8.subarray(p + 46, p + 46 + nameLen));
+      entries[name] = { method: dv.getUint16(p + 10, true), size: dv.getUint32(p + 20, true), local: dv.getUint32(p + 42, true) };
+      p += 46 + nameLen + dv.getUint16(p + 30, true) + dv.getUint16(p + 32, true);
+    }
+    async function read(name){
+      var e = entries[name];
+      if (!e) return null;
+      var start = e.local + 30 + dv.getUint16(e.local + 26, true) + dv.getUint16(e.local + 28, true);
+      var bytes = u8.subarray(start, start + e.size);
+      if (e.method === 0) return bytes;
+      if (e.method !== 8) throw new Error('unsupported zip compression');
+      var stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
+      return new Uint8Array(await new Response(stream).arrayBuffer());
+    }
+    return {
+      names: Object.keys(entries),
+      text: async function(name){ var b = await read(name); return b === null ? null : dec.decode(b); }
+    };
+  }
+
+  /* ---- sliced-file readers ---- */
+  function parseDuration(s){
+    var m = /^(?:(\d+)d\s*)?(?:(\d+)h\s*)?(?:(\d+)m\s*)?(?:(\d+)s)?$/.exec(s.trim());
+    return m ? (+m[1] || 0) * 86400 + (+m[2] || 0) * 3600 + (+m[3] || 0) * 60 + (+m[4] || 0) : 0;
+  }
+  function sumList(s){
+    return s.split(/[,;]/).reduce(function(a, v){ return a + (parseFloat(v) || 0); }, 0);
+  }
+  function firstMatch(text, patterns){
+    for (var i = 0; i < patterns.length; i++){ var m = patterns[i].exec(text); if (m) return m[1]; }
+    return null;
+  }
+  // Summary comments written by Bambu Studio / OrcaSlicer, PrusaSlicer, and Cura.
+  function parseGcode(text){
+    var time = firstMatch(text, [/total estimated time:\s*([\dd hms]+)/i, /model printing time:\s*([\dd hms]+)/i, /estimated printing time[^=\n]*=\s*([\dd hms]+)/i]);
+    var cura = /^;TIME:(\d+)/m.exec(text);
+    var grams = firstMatch(text, [/total filament weight \[g\]\s*:\s*([\d.,; ]+)/i, /total filament used \[g\]\s*=\s*([\d.,; ]+)/i, /filament used \[g\]\s*=\s*([\d.,; ]+)/i]);
+    var type = firstMatch(text, [/^;\s*filament_type\s*=\s*([^\r\n]+)/m]);
+    if (time === null && !cura && grams === null) throw new Error('no slicer summary in this G-code');
+    return {
+      kind: 'sliced',
+      seconds: time !== null ? parseDuration(time) : cura ? +cura[1] : 0,
+      grams: grams !== null ? sumList(grams) : 0,
+      filamentType: type ? type.split(/[;,]/)[0].trim() : null
+    };
+  }
+  // Metadata/slice_info.config inside a Bambu Studio 3MF that has been sliced.
+  function parseSliceInfo(xml){
+    var out = { kind: 'sliced', seconds: 0, grams: 0, filamentType: null, plates: 0 }, m, v;
+    var re = /<plate\b[^>]*>([\s\S]*?)<\/plate>/g;
+    while ((m = re.exec(xml))){
+      out.plates++;
+      if ((v = /key="prediction"\s+value="([\d.]+)"/.exec(m[1]))) out.seconds += +v[1];
+      if ((v = /key="weight"\s+value="([\d.]+)"/.exec(m[1]))) out.grams += +v[1];
+      if (!out.filamentType && (v = /<filament\b[^>]*\btype="([^"]+)"/.exec(m[1]))) out.filamentType = v[1];
+    }
+    if (!out.plates) throw new Error('no sliced plates in this 3MF');
+    return out;
+  }
+
+  /* ---- mesh readers: Float32Array of triangles, 9 floats each, in mm ---- */
+  function pushTri(out, v, a, b, c){
+    out.push(v[a], v[a + 1], v[a + 2], v[b], v[b + 1], v[b + 2], v[c], v[c + 1], v[c + 2]);
+  }
+  function parseSTL(buf){
+    var n = buf.byteLength, dv = new DataView(buf);
+    if (n >= 84 && 84 + dv.getUint32(80, true) * 50 === n){
+      var count = dv.getUint32(80, true), tris = new Float32Array(count * 9);
+      for (var i = 0, p = 96; i < count; i++, p += 50){
+        for (var k = 0; k < 9; k++) tris[i * 9 + k] = dv.getFloat32(p + k * 4, true);
+      }
+      return tris;
+    }
+    var text = new TextDecoder().decode(buf), re = /vertex\s+([-+.\deE]+)\s+([-+.\deE]+)\s+([-+.\deE]+)/g, m, arr = [];
+    while ((m = re.exec(text))) arr.push(+m[1], +m[2], +m[3]);
+    if (!arr.length || arr.length % 9) throw new Error('not a valid STL');
+    return Float32Array.from(arr);
+  }
+  function parseOBJ(text){
+    var v = [], tris = [], lines = text.split(/\r?\n/);
+    for (var i = 0; i < lines.length; i++){
+      var parts = lines[i].trim().split(/\s+/);
+      if (parts[0] === 'v') v.push(+parts[1], +parts[2], +parts[3]);
+      else if (parts[0] === 'f'){
+        var idx = parts.slice(1).map(function(t){ var k = parseInt(t, 10); return (k < 0 ? v.length / 3 + k : k - 1) * 3; });
+        for (var j = 1; j + 1 < idx.length; j++) pushTri(tris, v, idx[0], idx[j], idx[j + 1]);
+      }
+    }
+    if (!tris.length) throw new Error('not a valid OBJ');
+    return Float32Array.from(tris);
+  }
+
+  var UNIT_MM = { micron: 0.001, millimeter: 1, centimeter: 10, inch: 25.4, foot: 304.8, meter: 1000 };
+  // 3MF transforms are 3x4 row-major and act on row vectors: p' = p * M + t
+  function parseTransform(s){ return s ? s.trim().split(/\s+/).map(Number) : [1,0,0, 0,1,0, 0,0,1, 0,0,0]; }
+  function applyT(m, x, y, z){
+    return [x * m[0] + y * m[3] + z * m[6] + m[9], x * m[1] + y * m[4] + z * m[7] + m[10], x * m[2] + y * m[5] + z * m[8] + m[11]];
+  }
+  function composeT(a, b){ // a first, then b
+    var r = new Array(12), t = applyT(b, a[9], a[10], a[11]);
+    for (var i = 0; i < 3; i++) for (var j = 0; j < 3; j++) r[i * 3 + j] = a[i * 3] * b[j] + a[i * 3 + 1] * b[3 + j] + a[i * 3 + 2] * b[6 + j];
+    r[9] = t[0]; r[10] = t[1]; r[11] = t[2];
+    return r;
+  }
+  function attr(s, name){ var m = new RegExp('\\b' + name + '="([^"]*)"').exec(s); return m ? m[1] : null; }
+
+  // files: { path: xml } for every *.model in the package; mainPath: the root model.
+  function parse3MFModel(files, mainPath){
+    var tris = [], docs = {};
+    var scale = UNIT_MM[attr(files[mainPath].slice(0, 2000), 'unit') || 'millimeter'] || 1;
+    function doc(path){
+      if (!docs[path]){
+        var xml = files[path], objs = {}, m, re = /<object\b([^>]*)>([\s\S]*?)<\/object>/g;
+        if (xml == null) throw new Error('3MF is missing ' + path);
+        while ((m = re.exec(xml))) objs[attr(m[1], 'id')] = { type: attr(m[1], 'type'), body: m[2] };
+        docs[path] = objs;
+      }
+      return docs[path];
+    }
+    function emit(path, id, T){
+      var obj = doc(path)[id], m, hasComponents = false, cre = /<component\b([^>]*)\/?>/g;
+      if (!obj) throw new Error('3MF object ' + id + ' not found');
+      if (obj.type && obj.type !== 'model') return;
+      while ((m = cre.exec(obj.body))){
+        hasComponents = true;
+        var p = attr(m[1], 'path');
+        emit(p ? p.replace(/^\//, '') : path, attr(m[1], 'objectid'), composeT(parseTransform(attr(m[1], 'transform')), T));
+      }
+      if (hasComponents) return;
+      var verts = [], vre = /<vertex\s+x="([^"]+)"\s+y="([^"]+)"\s+z="([^"]+)"/g;
+      while ((m = vre.exec(obj.body))){ var q = applyT(T, +m[1], +m[2], +m[3]); verts.push(q[0] * scale, q[1] * scale, q[2] * scale); }
+      var tre = /<triangle\s+v1="(\d+)"\s+v2="(\d+)"\s+v3="(\d+)"/g;
+      while ((m = tre.exec(obj.body))) pushTri(tris, verts, m[1] * 3, m[2] * 3, m[3] * 3);
+    }
+    var build = /<build\b[^>]*>([\s\S]*?)<\/build>/.exec(files[mainPath]), m, ire = /<item\b([^>]*)\/?>/g;
+    if (!build) throw new Error('3MF has no build section');
+    while ((m = ire.exec(build[1]))) emit(mainPath, attr(m[1], 'objectid'), parseTransform(attr(m[1], 'transform')));
+    if (!tris.length) throw new Error('3MF has no mesh data');
+    return Float32Array.from(tris);
+  }
+  // Sliced Bambu 3MF -> { kind:'sliced', ..., tris } (mesh kept for calibration); plain 3MF -> { kind:'mesh', tris }.
+  async function parse3MF(buf){
+    var zip = readZip(buf), files = {}, mesh = null, meshError = null;
+    for (var i = 0; i < zip.names.length; i++){
+      if (/\.model$/i.test(zip.names[i])) files[zip.names[i]] = await zip.text(zip.names[i]);
+    }
+    var main = files['3D/3dmodel.model'] != null ? '3D/3dmodel.model' : Object.keys(files).filter(function(n){ return /^3D\/[^/]+\.model$/i.test(n); })[0];
+    try { mesh = main ? parse3MFModel(files, main) : null; } catch (e){ meshError = e; }
+    var info = await zip.text('Metadata/slice_info.config');
+    if (info !== null){
+      try { var out = parseSliceInfo(info); out.tris = mesh; return out; } catch (e){ if (!mesh) throw e; }
+    }
+    if (!mesh) throw meshError || new Error('3MF has no model');
+    return { kind: 'mesh', tris: mesh };
+  }
+
+  /* ---- geometry ---- */
+  // overhangDeg: downward faces tilted more than this from vertical, and not resting on the bed, count as overhangs.
+  function meshMetrics(tris, overhangDeg){
+    var n = tris.length / 9, min = [Infinity, Infinity, Infinity], max = [-Infinity, -Infinity, -Infinity], i, k;
+    if (!n) throw new Error('empty mesh');
+    for (i = 0; i < tris.length; i++){ k = i % 3; if (tris[i] < min[k]) min[k] = tris[i]; if (tris[i] > max[k]) max[k] = tris[i]; }
+    var sinT = Math.sin(overhangDeg * Math.PI / 180), zMin = min[2];
+    var vol = 0, area = 0, topW = 0, botW = 0, wallW = 0, over = 0, overMoment = 0;
+    for (i = 0; i < n; i++){
+      var o = i * 9, ax = tris[o], ay = tris[o + 1], az = tris[o + 2], bx = tris[o + 3], by = tris[o + 4], bz = tris[o + 5], cx = tris[o + 6], cy = tris[o + 7], cz = tris[o + 8];
+      vol += (ax * (by * cz - bz * cy) + ay * (bz * cx - bx * cz) + az * (bx * cy - by * cx)) / 6;
+      var ux = bx - ax, uy = by - ay, uz = bz - az, vx = cx - ax, vy = cy - ay, vz = cz - az;
+      var nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+      var len = Math.sqrt(nx * nx + ny * ny + nz * nz), a = len / 2;
+      if (!len) continue;
+      var up = nz / len; // -1 faces straight down, +1 straight up
+      area += a;
+      if (up > 0) topW += a * up; else botW -= a * up;
+      wallW += a * (1 - Math.abs(up));
+      if (-up > sinT && Math.max(az, bz, cz) > zMin + 0.3){
+        over += a;
+        overMoment += a * ((az + bz + cz) / 3 - zMin);
+      }
+    }
+    var size = [max[0] - min[0], max[1] - min[1], max[2] - min[2]];
+    vol = Math.abs(vol);
+    return {
+      triangles: n, volume: vol, area: area, size: size, height: size[2],
+      topW: topW, botW: botW, wallW: wallW,
+      overhangArea: over, overhangDrop: over ? overMoment / over : 0,
+      suspect: vol > size[0] * size[1] * size[2] * 1.001 || vol < 1e-9
+    };
+  }
+
+  /* ---- estimate model ---- */
+  // m: meshMetrics(); est: EST constants; mat: { density g/cm³, flow mm³/s }.
+  function estimate(m, est, mat, withSupports){
+    var shell = Math.min(m.volume, m.topW * est.topThickness + m.botW * est.bottomThickness + m.wallW * est.wallThickness);
+    var infill = (m.volume - shell) * est.infill;
+    var support = withSupports ? m.overhangArea * m.overhangDrop * est.supportDensity : 0;
+    var extruded = shell + infill + support;
+    var layers = Math.max(1, Math.ceil(m.height / est.layerHeight - 1e-6));
+    var seconds = extruded / mat.flow + layers * est.layerSeconds + est.fixedSeconds;
+    return { extruded: extruded, support: support, layers: layers, grams: extruded / 1000 * mat.density + est.fixedGrams, hours: seconds / 3600 };
+  }
+
+  return {
+    readZip: readZip, parseDuration: parseDuration, parseGcode: parseGcode, parseSliceInfo: parseSliceInfo,
+    parseSTL: parseSTL, parseOBJ: parseOBJ, parse3MFModel: parse3MFModel, parse3MF: parse3MF,
+    meshMetrics: meshMetrics, estimate: estimate
+  };
+})();
+/* BRC_MODEL_END */
+//]]>
+</script>
+
+<script>
+//<![CDATA[
 (function(){
   "use strict";
 
   /* ============ EDITABLE PRICING DATA ============ */
   // Per-gram filament rates by pricing tier (1 = BRC, 2 = USU, 3 = external).
+  // filament: matches the slicer's filament_type. density: g/cm³ from the Bambu
+  // filament profile. flow: effective average extrusion rate (mm³/s) over a whole
+  // print, used only by the model-file estimate; calibrate against real slices.
   var MATERIALS = [
-    { id:'pla',     name:'PLA Basic',           rates:{ 1:0.0299, 2:0.0460, 3:0.0575 }, note:'Default' },
-    { id:'petg',    name:'PETG Basic (refill)', rates:{ 1:0.0260, 2:0.0400, 3:0.0500 }, note:'Durable, outdoor' },
-    { id:'abs',     name:'ABS',                 rates:{ 1:0.0325, 2:0.0500, 3:0.0625 }, note:'Heat resistant' },
-    { id:'petg_hf', name:'PETG HF',             rates:{ 1:0.0429, 2:0.0660, 3:0.0825 }, note:'High-flow PETG' },
-    { id:'petcf',   name:'PET-CF',              rates:{ 1:0.0780, 2:0.1200, 3:0.1500 }, note:'CF nozzle required — abrasive, needs drying' },
-    { id:'tpu',     name:'TPU for AMS',         rates:{ 1:0.0455, 2:0.0700, 3:0.0875 }, note:'Flexible, finicky — needs drying' }
+    { id:'pla',     name:'PLA Basic',           rates:{ 1:0.0299, 2:0.0460, 3:0.0575 }, filament:'PLA',    density:1.26, flow:7,   note:'Default' },
+    { id:'petg',    name:'PETG Basic (refill)', rates:{ 1:0.0260, 2:0.0400, 3:0.0500 }, filament:'PETG',   density:1.25, flow:6.5, note:'Durable, outdoor' },
+    { id:'abs',     name:'ABS',                 rates:{ 1:0.0325, 2:0.0500, 3:0.0625 }, filament:'ABS',    density:1.04, flow:6.5, note:'Heat resistant' },
+    { id:'petg_hf', name:'PETG HF',             rates:{ 1:0.0429, 2:0.0660, 3:0.0825 }, filament:'PETG',   density:1.28, flow:7,   note:'High-flow PETG' },
+    { id:'petcf',   name:'PET-CF',              rates:{ 1:0.0780, 2:0.1200, 3:0.1500 }, filament:'PET-CF', density:1.29, flow:3,   note:'CF nozzle required — abrasive, needs drying' },
+    { id:'tpu',     name:'TPU for AMS',         rates:{ 1:0.0455, 2:0.0700, 3:0.0875 }, filament:'TPU',    density:1.26, flow:4,   note:'Flexible, finicky — needs drying' }
   ];
 
   var TIERS = {
@@ -521,6 +777,23 @@
     '1': { mult:1.00, label:'1–2 colors' },
     '2': { mult:1.10, label:'3–4 colors (+10% filament)' },
     '3': { mult:1.20, label:'5–6 colors (+20% filament)' }
+  };
+
+  // Estimate model for raw STL / 3MF / OBJ files. Geometry from the H2C
+  // "0.20mm Standard" process profile. layerSeconds, fixedSeconds, fixedGrams,
+  // supportDensity and the per-material flow rates are the calibration knobs.
+  var EST = {
+    layerHeight: 0.2,       // mm
+    wallThickness: 0.87,    // mm: 2 walls (0.42 outer + 0.45 inner)
+    topThickness: 1.0,      // mm: 5 top layers
+    bottomThickness: 0.6,   // mm: 3 bottom layers
+    infill: 0.15,           // sparse infill density
+    overhangAngle: 30,      // deg from vertical (support threshold angle)
+    overhangMinArea: 100,   // mm² of overhang before supports get ticked
+    supportDensity: 0.08,   // fraction of the overhang-to-bed volume printed as support
+    layerSeconds: 4.5,      // per-layer overhead: travel, z moves, small features
+    fixedSeconds: 360,      // pre-print: leveling, purge line, nozzle prep
+    fixedGrams: 1           // purge line
   };
 
   // Sales tax: Vernal, UT combined rate (state 4.85% + local) per the Utah
@@ -777,9 +1050,103 @@
     }
   }
 
+  /* ---- model / sliced file intake ---- */
+  var lastModel = null; // { sliced, calib, metrics, meshNames, errors } or null
+
+  function materialFor(filamentType){
+    var t = (filamentType || '').toUpperCase();
+    return MATERIALS.filter(function(m){ return t.indexOf(m.filament) === 0; })[0];
+  }
+  function fmtDuration(s){
+    var h = Math.floor(s / 3600), m = Math.round((s % 3600) / 60);
+    return (h ? h + 'h ' : '') + m + 'm';
+  }
+
+  async function parseModelFile(file){
+    var ext = file.name.toLowerCase().split('.').pop(), buf = await file.arrayBuffer();
+    if (ext === 'gcode') return BRCModel.parseGcode(new TextDecoder().decode(buf));
+    if (ext === '3mf') return BRCModel.parse3MF(buf);
+    if (ext === 'stl') return { kind:'mesh', tris: BRCModel.parseSTL(buf) };
+    if (ext === 'obj') return { kind:'mesh', tris: BRCModel.parseOBJ(new TextDecoder().decode(buf)) };
+    throw new Error('unsupported type; use STL, 3MF, OBJ, or Bambu Studio G-code');
+  }
+
+  async function loadModelFiles(files){
+    if (!files || !files.length) return;
+    var sliced = null, calib = null, meshes = [], meshNames = [], errors = [];
+    $('modelStatus').textContent = 'Reading…';
+    for (var i = 0; i < files.length; i++){
+      try {
+        var r = await parseModelFile(files[i]);
+        if (r.kind === 'mesh'){ meshes.push(r.tris); meshNames.push(files[i].name); continue; }
+        sliced = sliced || { seconds:0, grams:0, filamentType:null };
+        sliced.seconds += r.seconds;
+        sliced.grams += r.grams;
+        sliced.filamentType = sliced.filamentType || r.filamentType;
+        calib = calib || r.tris || null;
+      } catch (e){ errors.push(files[i].name + ' (' + e.message + ')'); }
+    }
+    var metrics = null;
+    if (meshes.length){
+      var total = meshes.reduce(function(n, t){ return n + t.length; }, 0), all = new Float32Array(total), off = 0;
+      meshes.forEach(function(t){ all.set(t, off); off += t.length; });
+      metrics = BRCModel.meshMetrics(all, EST.overhangAngle);
+    }
+    $('modelFile').value = '';
+    if (!sliced && !metrics){
+      lastModel = null;
+      $('modelStatus').textContent = 'Could not read ' + errors.join(', ') + '.';
+      return;
+    }
+    lastModel = { sliced: sliced, calib: calib, metrics: metrics, meshNames: meshNames, errors: errors };
+    var mat = sliced && materialFor(sliced.filamentType);
+    if (mat){ materialSelect.value = mat.id; updateMaterialNote(); }
+    if (metrics && metrics.overhangArea >= EST.overhangMinArea) $('supports').checked = true;
+    fillFromModel();
+  }
+
+  // Fills grams/hours from lastModel using the current material and supports choice.
+  function fillFromModel(){
+    if (!lastModel) return;
+    var L = lastModel, mat = getMaterial(), hours = 0, grams = 0, parts = [];
+    if (L.sliced){
+      hours += L.sliced.seconds / 3600;
+      grams += L.sliced.grams;
+      parts.push('From slicer: ' + fmtDuration(L.sliced.seconds) + ', ' + L.sliced.grams.toFixed(1) + ' g' + (L.sliced.filamentType ? ' ' + L.sliced.filamentType : '') + ' (exact).');
+      if (staffMode && L.calib){
+        var cm = BRCModel.meshMetrics(L.calib, EST.overhangAngle);
+        var ce = BRCModel.estimate(cm, EST, mat, cm.overhangArea >= EST.overhangMinArea);
+        parts.push('Calibration check: the estimate model would say ' + ce.grams.toFixed(1) + ' g / ' + ce.hours.toFixed(2) + ' h.');
+        console.log('BRC estimate calibration', { slicer: L.sliced, metrics: cm, estimate: ce });
+      }
+    }
+    if (L.metrics){
+      var m = L.metrics, e = BRCModel.estimate(m, EST, mat, $('supports').checked);
+      hours += e.hours;
+      grams += e.grams;
+      parts.push('Estimated from ' + L.meshNames.join(', ') + ': ' + (e.extruded / 1000).toFixed(1) + ' cm³ of material, ' + Math.round(m.height) + ' mm tall (' + e.layers + ' layers). Rough estimate (±25%); the final quote uses the actual slice.');
+      if (m.overhangArea >= EST.overhangMinArea) parts.push('Overhangs found (' + (m.overhangArea / 100).toFixed(1) + ' cm²): supports ' + ($('supports').checked ? 'added' : 'suggested') + '.');
+      if (m.suspect) parts.push('The mesh does not look closed, so the material figure is unreliable.');
+    }
+    if (L.errors.length) parts.push('Could not read ' + L.errors.join(', ') + '.');
+    $('hours').value = hours.toFixed(L.metrics ? 1 : 2);
+    $('grams').value = grams.toFixed(L.metrics ? 0 : 1);
+    $('modelStatus').textContent = parts.join(' ');
+    renderReadout();
+  }
+
+  function clearModel(){
+    if (!lastModel) return;
+    lastModel = null;
+    $('modelStatus').textContent = '';
+  }
+
   /* ---- wire up events ---- */
   ['grams','hours','custName','jobDesc'].forEach(function(id){
     $(id).addEventListener('input', renderReadout);
+  });
+  ['grams','hours'].forEach(function(id){
+    $(id).addEventListener('input', clearModel);
   });
   ['colors'].forEach(function(id){
     $(id).addEventListener('change', renderReadout);
@@ -787,10 +1154,21 @@
   ['abrasive','drying','supports'].forEach(function(id){
     $(id).addEventListener('change', renderReadout);
   });
+  $('supports').addEventListener('change', fillFromModel);
   materialSelect.addEventListener('change', function(){
     updateMaterialNote();
+    fillFromModel();
     renderReadout();
   });
+  $('modelFile').addEventListener('change', function(){ loadModelFiles(this.files); });
+  var dropZone = $('dropZone');
+  ['dragenter','dragover'].forEach(function(ev){
+    dropZone.addEventListener(ev, function(e){ e.preventDefault(); dropZone.classList.add('over'); });
+  });
+  ['dragleave','drop'].forEach(function(ev){
+    dropZone.addEventListener(ev, function(e){ e.preventDefault(); dropZone.classList.remove('over'); });
+  });
+  dropZone.addEventListener('drop', function(e){ loadModelFiles(e.dataTransfer.files); });
   document.querySelectorAll('input[name="tier"]').forEach(function(radio){
     radio.addEventListener('change', function(){
       updateTierCardStyles();
