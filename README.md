@@ -17,6 +17,8 @@ Drop a file on the "Model or sliced file" box (or click it) and the weight and p
 - **Bambu Studio `.gcode` or sliced `.3mf`** (File > Export > Export plate sliced file): the slicer's own time and weight, exact. The material is selected from the filament type.
 - **STL / 3MF / OBJ**: a geometric estimate. The page computes mesh volume, surface area, height, and overhang area, then applies the H2C "0.20mm Standard" profile (2 walls, 5 top / 3 bottom layers, 15% infill) and a simple time model. Expect roughly +/-20% on weight and +/-30% on time. Supports get ticked automatically when the overhang area is significant. The final quote should come from the real slice.
 
+With a quantity above 1, the estimate spreads the pre-print overhead (`fixedSeconds`, `fixedGrams`) across the copies, assuming they print on one plate.
+
 STEP files are not supported; export STL or 3MF instead.
 
 ### Calibrating the estimate

@@ -175,6 +175,15 @@ test('estimate: shell + infill, layers, grams, hours', () => {
   assert.equal(e.support, 0);
 });
 
+test('estimate: pre-print overhead is spread across a batch of copies', () => {
+  const m = M.meshMetrics(CUBE, 30);
+  const one = M.estimate(m, EST, PLA, false), four = M.estimate(m, EST, PLA, false, 4);
+  assert.equal(four.extruded, one.extruded);
+  near(one.hours - four.hours, 360 * 0.75 / 3600, 1e-9);
+  near(one.grams - four.grams, 0.75, 1e-9);
+  for (const q of [undefined, 0, NaN, 1.9]) near(M.estimate(m, EST, PLA, false, q).hours, one.hours, 1e-12);
+});
+
 test('estimate: thin sheet is all shell, no infill', () => {
   const e = M.estimate(M.meshMetrics(boxTris([0, 0, 0], [100, 100, 0.5]), 30), EST, PLA, false);
   near(e.extruded, 5000);

@@ -727,14 +727,17 @@ var BRCModel = (function(){
 
   /* ---- estimate model ---- */
   // m: meshMetrics(); est: EST constants; mat: { density g/cm³, flow mm³/s }.
-  function estimate(m, est, mat, withSupports){
+  // Per-copy estimate. qty: copies printed on one plate; the pre-print
+  // overhead (fixedSeconds, fixedGrams) is spread across them.
+  function estimate(m, est, mat, withSupports, qty){
+    var copies = Math.max(1, Math.floor(qty) || 1);
     var shell = Math.min(m.volume, m.topW * est.topThickness + m.botW * est.bottomThickness + m.wallW * est.wallThickness);
     var infill = (m.volume - shell) * est.infill;
     var support = withSupports ? m.overhangArea * m.overhangDrop * est.supportDensity : 0;
     var extruded = shell + infill + support;
     var layers = Math.max(1, Math.ceil(m.height / est.layerHeight - 1e-6));
-    var seconds = extruded / mat.flow + layers * est.layerSeconds + est.fixedSeconds;
-    return { extruded: extruded, support: support, layers: layers, grams: extruded / 1000 * mat.density + est.fixedGrams, hours: seconds / 3600 };
+    var seconds = extruded / mat.flow + layers * est.layerSeconds + est.fixedSeconds / copies;
+    return { extruded: extruded, support: support, layers: layers, grams: extruded / 1000 * mat.density + est.fixedGrams / copies, hours: seconds / 3600 };
   }
 
   return {
@@ -1134,16 +1137,17 @@ var BRCModel = (function(){
       }
     }
     if (L.metrics){
-      var m = L.metrics, e = BRCModel.estimate(m, EST, mat, $('supports').checked);
+      var copies = calculate().qty;
+      var m = L.metrics, e = BRCModel.estimate(m, EST, mat, $('supports').checked, copies);
       hours += e.hours;
       grams += e.grams;
-      parts.push('Estimated from ' + L.meshNames.join(', ') + ': ' + (e.extruded / 1000).toFixed(1) + ' cm³ of material, ' + Math.round(m.height) + ' mm tall (' + e.layers + ' layers). Rough estimate (±25%); the final quote uses the actual slice.');
+      parts.push('Estimated from ' + L.meshNames.join(', ') + ': ' + (e.extruded / 1000).toFixed(1) + ' cm³ of material, ' + Math.round(m.height) + ' mm tall (' + e.layers + ' layers)' + (copies > 1 ? ' per copy, with the pre-print setup spread across ' + copies + ' copies on one plate' : '') + '. Rough estimate (±25%); the final quote uses the actual slice.');
       if (m.overhangArea >= EST.overhangMinArea) parts.push('Overhangs found (' + (m.overhangArea / 100).toFixed(1) + ' cm²): supports ' + ($('supports').checked ? 'added' : 'suggested') + '.');
       if (m.suspect) parts.push('The mesh does not look closed, so the material figure is unreliable.');
     }
     if (L.errors.length) parts.push('Could not read ' + L.errors.join(', ') + '.');
-    $('hours').value = hours.toFixed(L.metrics ? 1 : 2);
-    $('grams').value = grams.toFixed(L.metrics ? 0 : 1);
+    $('hours').value = hours.toFixed(2);
+    $('grams').value = grams.toFixed(1);
     $('modelStatus').textContent = parts.join(' ');
     renderReadout();
   }
@@ -1159,6 +1163,7 @@ var BRCModel = (function(){
     $(id).addEventListener('input', renderReadout);
   });
   $('qty').addEventListener('change', function(){ this.value = calculate().qty; });
+  $('qty').addEventListener('input', fillFromModel);
   ['grams','hours'].forEach(function(id){
     $(id).addEventListener('input', clearModel);
   });
