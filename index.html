@@ -755,7 +755,7 @@ var BRCModel = (function(){
     var support = withSupports ? m.overhangArea * m.overhangDrop * est.supportDensity : 0;
     var extruded = shell + infill + support;
     var layers = Math.max(1, Math.ceil(m.height / est.layerHeight - 1e-6));
-    var seconds = extruded / mat.flow + layers * est.layerSeconds + est.fixedSeconds / copies;
+    var seconds = (extruded - support) / mat.flow + support / (est.supportFlow || mat.flow) + layers * est.layerSeconds + est.fixedSeconds / copies;
     return { extruded: extruded, support: support, layers: layers, grams: extruded / 1000 * mat.density + est.fixedGrams / copies, hours: seconds / 3600 };
   }
 
@@ -803,7 +803,8 @@ var BRCModel = (function(){
 
   // Estimate model for raw STL / 3MF / OBJ files. Geometry from the H2C
   // "0.20mm Standard" process profile. layerSeconds, fixedSeconds, fixedGrams,
-  // supportDensity and the per-material flow rates are the calibration knobs.
+  // supportDensity, supportFlow and the per-material flow rates are the
+  // calibration knobs (fitted 2026-09-03 against five H2C slices; see README).
   var EST = {
     layerHeight: 0.2,       // mm
     wallThickness: 0.87,    // mm: 2 walls (0.42 outer + 0.45 inner)
@@ -812,7 +813,8 @@ var BRCModel = (function(){
     infill: 0.15,           // sparse infill density
     overhangAngle: 30,      // deg from vertical (support threshold angle)
     overhangMinArea: 100,   // mm² of overhang before supports get ticked
-    supportDensity: 0.08,   // fraction of the overhang-to-bed volume printed as support
+    supportDensity: 0.03,   // fraction of the overhang-to-bed volume printed as tree support
+    supportFlow: 1.5,       // mm³/s while printing support: thin tree branches, lots of travel
     layerSeconds: 4.5,      // per-layer overhead: travel, z moves, small features
     fixedSeconds: 360,      // pre-print: leveling, purge line, nozzle prep
     fixedGrams: 1           // purge line

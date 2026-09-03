@@ -23,7 +23,9 @@ STEP files are not supported; export STL or 3MF instead.
 
 ### Calibrating the estimate
 
-The knobs are the `EST` constants and the `density` / `flow` fields in `MATERIALS`, next to the pricing constants in `index.html`. Open the page with `?brc` and drop a Bambu Studio project `.3mf` that was saved after slicing (File > Save project): it holds both the mesh and the slicer's numbers, and the status line shows what the estimate model would have predicted next to them (details in the browser console). An exported `.gcode.3mf` gives exact numbers for quoting but carries no mesh, so it cannot feed the calibration check. Adjust `flow` (mm³/s per material) and `layerSeconds` until a few real prints of different sizes line up. `fixedSeconds` is the pre-print time (leveling, purge line) and `fixedGrams` the purge line.
+The knobs are the `EST` constants and the `density` / `flow` fields in `MATERIALS`, next to the pricing constants in `index.html`. Open the page with `?brc` and drop a Bambu Studio project `.3mf` that was saved after slicing (File > Save project): it holds both the mesh and the slicer's numbers, and the status line shows what the estimate model would have predicted next to them (details in the browser console). An exported `.gcode.3mf` gives exact numbers for quoting but carries no mesh, so it cannot feed the calibration check. Adjust `flow` (mm³/s per material) and `layerSeconds` until a few real prints of different sizes line up. `fixedSeconds` is the pre-print time (leveling, purge line) and `fixedGrams` the purge line. `supportDensity` and `supportFlow` govern tree support: how much material it adds and how slowly it prints.
+
+The 2026-09-03 fit used five H2C slices (a plate of 20 PETG keychains, a PETG sign, a 16 h PETG dragon with tree supports, a 0.12 mm PLA statue, and a four-color painted PLA python). On the default 0.20 mm Standard profile the time estimate sits within about 20 percent and weight runs 0 to 30 percent high, more on flat parts with small lettering. Prints on other profiles (0.12 mm, painted multi-color with flushing) fall outside the model, and only the real slice is worth quoting from.
 
 ## Tests
 

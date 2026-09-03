@@ -153,7 +153,7 @@ function zip64(entries){
 }
 
 const CUBE = boxTris([0, 0, 0], [10, 10, 10]);
-const EST = { layerHeight:0.2, wallThickness:0.87, topThickness:1.0, bottomThickness:0.6, infill:0.15, supportDensity:0.08, layerSeconds:4.5, fixedSeconds:360, fixedGrams:1 };
+const EST = { layerHeight:0.2, wallThickness:0.87, topThickness:1.0, bottomThickness:0.6, infill:0.15, supportDensity:0.08, supportFlow:1.5, layerSeconds:4.5, fixedSeconds:360, fixedGrams:1 };
 const PLA = { density:1.26, flow:9 };
 
 /* ---- mesh readers + metrics ---- */
@@ -232,6 +232,8 @@ test('estimate: supports add material only when requested and only where overhan
   near(withS.support, 100 * 5 * 0.08);
   near(withS.extruded - without.extruded, withS.support);
   assert.equal(M.estimate(M.meshMetrics(CUBE, 30), EST, PLA, true).support, 0);
+  // support volume prints at supportFlow, the rest at the material flow
+  near(withS.hours - without.hours, withS.support / 1.5 / 3600, 1e-9);
 });
 
 /* ---- sliced files ---- */
