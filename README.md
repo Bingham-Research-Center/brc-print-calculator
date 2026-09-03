@@ -14,7 +14,7 @@ To update prices, edit the `MATERIALS` / `TIERS` / `COLOR_OPTIONS` constants at 
 
 Drop a file on the "Model or sliced file" box (or click it) and the weight and print time fill in. Files are read in the browser and never uploaded.
 
-- **Bambu Studio `.gcode` or sliced `.3mf`** (File > Export > Export plate sliced file): the slicer's own time and weight, exact. The material is selected from the filament type.
+- **Bambu Studio `.gcode` or sliced `.3mf`** (File > Export > Export plate sliced file): the slicer's own time and weight, exact. The material is selected from the filament type, and Quantity resets to 1 because the file already covers its whole plate; set it to the number of plates if the same plate prints more than once.
 - **STL / 3MF / OBJ**: a geometric estimate. The page computes mesh volume, surface area, height, and overhang area, then applies the H2C "0.20mm Standard" profile (2 walls, 5 top / 3 bottom layers, 15% infill) and a simple time model. Expect roughly +/-20% on weight and +/-30% on time. Supports get ticked automatically when the overhang area is significant. The final quote should come from the real slice.
 
 With a quantity above 1, the estimate spreads the pre-print overhead (`fixedSeconds`, `fixedGrams`) across the copies, assuming they print on one plate.

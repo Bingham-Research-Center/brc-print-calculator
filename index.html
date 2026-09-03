@@ -415,7 +415,7 @@
         <div class="field">
           <label class="f-label" for="qty">Quantity (identical copies)</label>
           <input type="number" id="qty" min="1" step="1" value="1" inputmode="numeric">
-          <div class="hint">Weight and print time are per copy. Labor, setup and handling fees are charged once per job. Leave at 1 if a sliced file already includes every copy.</div>
+          <div class="hint">Weight and print time are per copy. Labor, setup and handling fees are charged once per job. Loading a sliced file resets this to 1, since the file already covers its whole plate.</div>
         </div>
         <div class="field">
           <label class="f-label" for="colors">Colors used</label>
@@ -1114,9 +1114,11 @@ var BRCModel = (function(){
       $('modelStatus').textContent = 'Could not read ' + errors.join(', ') + '.';
       return;
     }
-    lastModel = { sliced: sliced, calib: calib, metrics: metrics, meshNames: meshNames, errors: errors };
+    lastModel = { sliced: sliced, calib: calib, metrics: metrics, meshNames: meshNames, errors: errors, qtyReset: false };
     var mat = sliced && materialFor(sliced.filamentType);
     if (mat){ materialSelect.value = mat.id; updateMaterialNote(); }
+    // A sliced file already covers its whole plate; quantity means extra plates from here on.
+    if (sliced && calculate().qty > 1){ $('qty').value = 1; lastModel.qtyReset = true; }
     if (metrics && metrics.overhangArea >= EST.overhangMinArea) $('supports').checked = true;
     fillFromModel();
   }
@@ -1124,11 +1126,12 @@ var BRCModel = (function(){
   // Fills grams/hours from lastModel using the current material and supports choice.
   function fillFromModel(){
     if (!lastModel) return;
-    var L = lastModel, mat = getMaterial(), hours = 0, grams = 0, parts = [];
+    var L = lastModel, mat = getMaterial(), copies = calculate().qty, hours = 0, grams = 0, parts = [];
     if (L.sliced){
       hours += L.sliced.seconds / 3600;
       grams += L.sliced.grams;
-      parts.push('From slicer: ' + fmtDuration(L.sliced.seconds) + ', ' + L.sliced.grams.toFixed(1) + ' g' + (L.sliced.filamentType ? ' ' + L.sliced.filamentType : '') + ' (exact).');
+      parts.push('From slicer: ' + fmtDuration(L.sliced.seconds) + ', ' + L.sliced.grams.toFixed(1) + ' g' + (L.sliced.filamentType ? ' ' + L.sliced.filamentType : '') + ' (exact' + (copies > 1 ? ', per plate × ' + copies + ' plates' : '') + ').');
+      if (L.qtyReset && copies === 1) parts.push('Quantity was reset to 1: the sliced file already covers every copy on the plate. Set it to the number of plates if this plate prints more than once.');
       if (staffMode && L.calib){
         var cm = BRCModel.meshMetrics(L.calib, EST.overhangAngle);
         var ce = BRCModel.estimate(cm, EST, mat, cm.overhangArea >= EST.overhangMinArea);
@@ -1137,7 +1140,6 @@ var BRCModel = (function(){
       }
     }
     if (L.metrics){
-      var copies = calculate().qty;
       var m = L.metrics, e = BRCModel.estimate(m, EST, mat, $('supports').checked, copies);
       hours += e.hours;
       grams += e.grams;
