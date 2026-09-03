@@ -398,6 +398,14 @@
           <div class="hint" id="modelStatus" role="status"></div>
         </div>
         <div class="field">
+          <label class="f-label" for="quality">Print quality</label>
+          <select id="quality">
+            <option value="standard">0.20 mm Standard — default</option>
+            <option value="fine">0.12 / 0.08 mm fine detail — about 2× the print time</option>
+          </select>
+          <div class="hint">Only changes the estimate from a model file. A sliced file already knows its layer height.</div>
+        </div>
+        <div class="field">
           <label class="f-label" for="material">Material</label>
           <select id="material"></select>
           <div class="material-note" id="materialNote"></div>
@@ -820,6 +828,14 @@ var BRCModel = (function(){
     fixedGrams: 1           // purge line
   };
 
+  // Print quality for the model-file estimate. On the two fine-layer slices
+  // measured, the H2C High Quality profiles (0.12 / 0.08 mm) moved about 40%
+  // of the material per second of the 0.20 mm Standard profile.
+  var QUALITY = {
+    standard: { layerHeight: 0.2,  flowScale: 1 },
+    fine:     { layerHeight: 0.12, flowScale: 0.4 }
+  };
+
   // Sales tax: Vernal, UT combined rate (state 4.85% + local) per the Utah
   // State Tax Commission rate chart, effective 4/1/2026. Uintah County's
   // unincorporated rate is lower (6.45%); Vernal city — where BRC sits —
@@ -1161,7 +1177,10 @@ var BRCModel = (function(){
       }
     }
     if (L.metrics){
-      var m = L.metrics, e = BRCModel.estimate(m, EST, mat, $('supports').checked, copies);
+      var q = QUALITY[$('quality').value] || QUALITY.standard;
+      var est = Object.assign({}, EST, { layerHeight: q.layerHeight });
+      var matQ = { density: mat.density, flow: mat.flow * q.flowScale };
+      var m = L.metrics, e = BRCModel.estimate(m, est, matQ, $('supports').checked, copies);
       hours += e.hours;
       grams += e.grams;
       parts.push('Estimated from ' + L.meshNames.join(', ') + ': ' + (e.extruded / 1000).toFixed(1) + ' cm³ of material, ' + Math.round(m.height) + ' mm tall (' + e.layers + ' layers)' + (copies > 1 ? ' per copy, with the pre-print setup spread across ' + copies + ' copies on one plate' : '') + '. Rough estimate (±25%); the final quote uses the actual slice.');
@@ -1197,6 +1216,7 @@ var BRCModel = (function(){
     $(id).addEventListener('change', renderReadout);
   });
   $('supports').addEventListener('change', fillFromModel);
+  $('quality').addEventListener('change', fillFromModel);
   materialSelect.addEventListener('change', function(){
     updateMaterialNote();
     fillFromModel();

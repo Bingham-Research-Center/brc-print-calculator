@@ -7,7 +7,7 @@ import { readFileSync } from 'node:fs';
 const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
 const start = html.indexOf('/* BRC_PRICE_START */'), end = html.indexOf('/* BRC_PRICE_END */');
 assert.ok(start > 0 && end > start, 'BRC_PRICE block not found in index.html');
-const P = new Function(html.slice(start, end) + '\nreturn { price, buildLines, MATERIALS, TIERS, TAX_RATE, PROCESSING_FEE_RATE };')();
+const P = new Function(html.slice(start, end) + '\nreturn { price, buildLines, MATERIALS, TIERS, TAX_RATE, PROCESSING_FEE_RATE, EST, QUALITY };')();
 
 const near = (a, b, tol = 1e-9) => assert.ok(Math.abs(a - b) <= tol, `${a} != ${b}`);
 const pla = P.MATERIALS[0];
@@ -84,4 +84,11 @@ test('line labels show the copy count only above 1, and never on flat fees', () 
   assert.ok(multi.includes('Labor (review, load, monitor, cleanup)'));
   assert.ok(multi.includes('Supports / complex geometry surcharge'));
   assert.ok(multi.some(l => l.startsWith('Sales tax — Vernal')));
+});
+
+test('print quality: standard matches the estimate profile, fine detail slows the flow', () => {
+  assert.equal(P.QUALITY.standard.layerHeight, P.EST.layerHeight);
+  assert.equal(P.QUALITY.standard.flowScale, 1);
+  assert.ok(P.QUALITY.fine.layerHeight < P.EST.layerHeight);
+  assert.equal(P.QUALITY.fine.flowScale, 0.4);
 });
