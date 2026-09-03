@@ -23,9 +23,9 @@ test('two tiers only, and every material prices both', () => {
 test('external tier, one copy: filament + time + labor, then tax and card fee', () => {
   const c = job();
   near(c.baseFilament, 50 * 0.0575);
-  near(c.timeFee, 20);
+  near(c.timeFee, 12);
   assert.equal(c.laborFee, 10);
-  near(c.costSubtotal, 2.875 + 20 + 10);
+  near(c.costSubtotal, 2.875 + 12 + 10);
   near(c.salesTax, c.costSubtotal * P.TAX_RATE);
   near(c.processingFee, (c.costSubtotal + c.salesTax) * P.PROCESSING_FEE_RATE);
   near(c.grandTotal, c.costSubtotal + c.salesTax + c.processingFee);
@@ -35,10 +35,10 @@ test('external tier, one copy: filament + time + labor, then tax and card fee', 
 test('BRC tier: materials, print time and setup; no labor, no sales tax; card fee still applies', () => {
   const c = job({ tierNum: 1, qty: 10 });
   near(c.baseFilament, 10 * 50 * 0.0299);
-  near(c.timeFee, 10 * 4 * 5);
+  near(c.timeFee, 10 * 4 * 1);
   assert.equal(c.laborFee, 0);
   assert.equal(c.setupFee, 1);
-  near(c.costSubtotal, 14.95 + 200 + 1);
+  near(c.costSubtotal, 14.95 + 40 + 1);
   assert.equal(c.salesTax, 0);
   near(c.processingFee, c.costSubtotal * P.PROCESSING_FEE_RATE);
   near(c.grandTotal, c.costSubtotal * (1 + P.PROCESSING_FEE_RATE));
@@ -67,12 +67,12 @@ test('quantity is clamped to a whole number of at least 1', () => {
 });
 
 test('minimum charge applies to the whole job; more copies can lift a job above it', () => {
-  const small = job({ grams: 5, hours: 0.5 });      // 0.2875 + 2.5 + 10 = 12.7875
+  const small = job({ grams: 5, hours: 1 });        // 0.2875 + 3 + 10 = 13.2875
   assert.equal(small.minApplied, true);
   near(small.costSubtotal, 15);
-  const two = job({ grams: 5, hours: 0.5, qty: 2 }); // 0.575 + 5 + 10 = 15.575
+  const two = job({ grams: 5, hours: 1, qty: 2 });   // 0.575 + 6 + 10 = 16.575
   assert.equal(two.minApplied, false);
-  near(two.costSubtotal, 15.575);
+  near(two.costSubtotal, 16.575);
 });
 
 test('line labels show the copy count only above 1, and never on flat fees', () => {
