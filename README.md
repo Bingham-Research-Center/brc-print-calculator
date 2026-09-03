@@ -23,7 +23,7 @@ STEP files are not supported; export STL or 3MF instead.
 
 ### Calibrating the estimate
 
-The knobs are the `EST` constants and the `density` / `flow` fields in `MATERIALS`, next to the pricing constants in `index.html`. Open the page with `?brc`, drop a sliced `.gcode.3mf` exported from Bambu Studio, and the status line shows what the estimate model would have predicted next to the slicer's real numbers (details in the browser console). Adjust `flow` (mm³/s per material) and `layerSeconds` until a few real prints of different sizes line up. `fixedSeconds` is the pre-print time (leveling, purge line) and `fixedGrams` the purge line.
+The knobs are the `EST` constants and the `density` / `flow` fields in `MATERIALS`, next to the pricing constants in `index.html`. Open the page with `?brc` and drop a Bambu Studio project `.3mf` that was saved after slicing (File > Save project): it holds both the mesh and the slicer's numbers, and the status line shows what the estimate model would have predicted next to them (details in the browser console). An exported `.gcode.3mf` gives exact numbers for quoting but carries no mesh, so it cannot feed the calibration check. Adjust `flow` (mm³/s per material) and `layerSeconds` until a few real prints of different sizes line up. `fixedSeconds` is the pre-print time (leveling, purge line) and `fixedGrams` the purge line.
 
 ## Tests
 

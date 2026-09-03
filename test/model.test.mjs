@@ -116,6 +116,42 @@ function zip(entries){
   return out.buffer;
 }
 
+// Same archive in zip64 form: 0xFFFFFFFF in the 32-bit size/offset fields, real values in
+// zip64 extra fields, plus the zip64 end-of-central-directory record and locator.
+function zip64(entries){
+  const enc = new TextEncoder(), crc = zlib.crc32 ? (b) => zlib.crc32(b) : () => 0, FF = 0xFFFFFFFF;
+  const parts = [], central = [];
+  let offset = 0;
+  const x64 = (...vals) => { const d = new DataView(new ArrayBuffer(4 + 8 * vals.length)); d.setUint16(0, 1, true); d.setUint16(2, 8 * vals.length, true); vals.forEach((v, i) => d.setBigUint64(4 + 8 * i, BigInt(v), true)); return new Uint8Array(d.buffer); };
+  for (const e of entries){
+    const raw = typeof e.data === 'string' ? enc.encode(e.data) : e.data, data = zlib.deflateRawSync(raw), name = enc.encode(e.name);
+    const lx = x64(raw.length, data.length), local = new DataView(new ArrayBuffer(30));
+    local.setUint32(0, 0x04034b50, true); local.setUint16(4, 45, true); local.setUint16(8, 8, true); local.setUint32(14, crc(raw), true);
+    local.setUint32(18, FF, true); local.setUint32(22, FF, true); local.setUint16(26, name.length, true); local.setUint16(28, lx.length, true);
+    const cx = x64(raw.length, data.length, offset), cd = new DataView(new ArrayBuffer(46));
+    cd.setUint32(0, 0x02014b50, true); cd.setUint16(6, 45, true); cd.setUint16(10, 8, true); cd.setUint32(16, crc(raw), true);
+    cd.setUint32(20, FF, true); cd.setUint32(24, FF, true); cd.setUint16(28, name.length, true); cd.setUint16(30, cx.length, true); cd.setUint32(42, FF, true);
+    parts.push(new Uint8Array(local.buffer), name, lx, data);
+    central.push(new Uint8Array(cd.buffer), name, cx);
+    offset += 30 + name.length + lx.length + data.length;
+  }
+  const cdSize = central.reduce((n, p) => n + p.length, 0);
+  const z64 = new DataView(new ArrayBuffer(56));
+  z64.setUint32(0, 0x06064b50, true); z64.setBigUint64(4, 44n, true); z64.setUint16(12, 45, true); z64.setUint16(14, 45, true);
+  z64.setBigUint64(24, BigInt(entries.length), true); z64.setBigUint64(32, BigInt(entries.length), true);
+  z64.setBigUint64(40, BigInt(cdSize), true); z64.setBigUint64(48, BigInt(offset), true);
+  const loc = new DataView(new ArrayBuffer(20));
+  loc.setUint32(0, 0x07064b50, true); loc.setBigUint64(8, BigInt(offset + cdSize), true); loc.setUint32(16, 1, true);
+  const eocd = new DataView(new ArrayBuffer(22));
+  eocd.setUint32(0, 0x06054b50, true); eocd.setUint16(8, entries.length, true); eocd.setUint16(10, entries.length, true);
+  eocd.setUint32(12, cdSize, true); eocd.setUint32(16, FF, true);
+  const all = [...parts, ...central, new Uint8Array(z64.buffer), new Uint8Array(loc.buffer), new Uint8Array(eocd.buffer)];
+  const out = new Uint8Array(all.reduce((n, p) => n + p.length, 0));
+  let o = 0;
+  for (const p of all){ out.set(p, o); o += p.length; }
+  return out.buffer;
+}
+
 const CUBE = boxTris([0, 0, 0], [10, 10, 10]);
 const EST = { layerHeight:0.2, wallThickness:0.87, topThickness:1.0, bottomThickness:0.6, infill:0.15, supportDensity:0.08, layerSeconds:4.5, fixedSeconds:360, fixedGrams:1 };
 const PLA = { density:1.26, flow:9 };
@@ -265,6 +301,12 @@ test('3MF: sliced Bambu project sums plates and keeps the mesh for calibration',
   assert.equal(r.seconds, 9673);
   near(r.grams, 40);
   assert.equal(r.filamentType, 'PLA');
+  near(M.meshMetrics(r.tris, 30).volume, 1000);
+});
+
+test('3MF: zip64 archive (MakerWorld export) reads like a plain one', async () => {
+  const r = await M.parse3MF(zip64([{ name: '3D/3dmodel.model', data: modelXML(CUBE) }, { name: '[Content_Types].xml', data: '<Types/>' }]));
+  assert.equal(r.kind, 'mesh');
   near(M.meshMetrics(r.tris, 30).volume, 1000);
 });
 
