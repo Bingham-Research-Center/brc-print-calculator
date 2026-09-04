@@ -913,7 +913,8 @@ var BRCModel = (function(){
   // Price band for a model-file estimate: weight and time both off by ±spread.
   function priceRange(inp, spread){
     var s = spread || 0.25, at = function(k){ return price(Object.assign({}, inp, { grams: inp.grams * k, hours: inp.hours * k })).grandTotal; };
-    return { low: at(1 - s), high: at(1 + s) };
+    var low = at(1 - s), high = at(1 + s);
+    return { low: low, high: high, flat: high - low < 0.005 }; // flat: the minimum charge covers the whole band
   }
 
   function buildLines(c){
@@ -1033,7 +1034,7 @@ var BRCModel = (function(){
     lastTotal = c.grandTotal;
 
     var range = numbersSource() === 'estimate' ? priceRange(readForm(), EST.spread) : null;
-    $('outRange').hidden = !range;
+    $('outRange').hidden = !range || range.flat;
     if (range) $('outRange').textContent = 'estimate range ' + money(range.low) + ' – ' + money(range.high);
 
     var ready = c.grams > 0 && $('custName').value.trim() !== '' && $('jobDesc').value.trim() !== '';
@@ -1093,7 +1094,7 @@ var BRCModel = (function(){
 
   function basisText(src, range){
     if (src === 'slicer') return 'Quote is based on the sliced file’s weight and print time. Final price is confirmed at pickup.';
-    if (src === 'estimate') return 'Quote is an estimate from the model file. Weight and print time are within about ±' + Math.round(EST.spread * 100) + '%, so expect a final price between ' + money(range.low) + ' and ' + money(range.high) + ', confirmed from the actual slice at pickup.';
+    if (src === 'estimate') return 'Quote is an estimate from the model file. Weight and print time are within about ±' + Math.round(EST.spread * 100) + '%, ' + (range.flat ? 'which still lands on the minimum charge' : 'so expect a final price between ' + money(range.low) + ' and ' + money(range.high)) + ', confirmed from the actual slice at pickup.';
     return 'Quote is based on the weight and print time provided. Final price is confirmed at pickup.';
   }
 

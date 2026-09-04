@@ -98,6 +98,10 @@ test('price range: ±25% on weight and time, flat fees unmoved', () => {
   near(r.low, job({ qty: 2, supports: true, grams: 37.5, hours: 3 }).grandTotal);
   near(r.high, job({ qty: 2, supports: true, grams: 62.5, hours: 5 }).grandTotal);
   assert.ok(r.low < c.grandTotal && c.grandTotal < r.high);
+  assert.equal(r.flat, false);
+  const tiny = P.priceRange({ material: pla, tierNum: 2, grams: 3, hours: 0.2, qty: 1, colorKey: '1', abrasive: false, drying: false, supports: false }, 0.25);
+  assert.equal(tiny.flat, true); // both ends sit on the $15 minimum
+  near(tiny.low, tiny.high);
 });
 
 test('multi-colour estimate multipliers grow with the colour count', () => {
