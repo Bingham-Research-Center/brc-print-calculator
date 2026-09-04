@@ -243,6 +243,8 @@
   .screen-total .tt-value.pulse{ animation:pulse .35s ease; }
   .screen-range{ text-align:right; font-family:'IBM Plex Mono',monospace; font-size:.76rem; color:#9FB2C1; margin-top:4px; }
   #quoteLogBtn{ margin-top:10px; }
+  .page-foot{ text-align:center; margin:22px 0 6px; font-size:.76rem; }
+  .page-foot a{ color:var(--muted); text-decoration:underline; text-underline-offset:3px; }
   @keyframes pulse{ 0%{ opacity:.4; transform:translateY(1px);} 100%{ opacity:1; transform:translateY(0);} }
 
   .btn{
@@ -526,6 +528,8 @@
     </div>
     <div class="form-note no-print" id="sendNote" hidden>PDF downloaded — attach it to the email that just opened.</div>
   </div>
+
+  <div class="page-foot no-print"><a href="?brc" id="staffLink">Staff view</a></div>
 
 </div>
 
@@ -956,10 +960,28 @@ var BRCModel = (function(){
   var money = function(n){ return '$' + n.toFixed(2); };
   var scrollMode = (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) ? 'auto' : 'smooth';
 
-  // Staff quoting view: append ?brc to the URL to show the internal BRC tier.
+  // Staff quoting view: ?brc in the URL, or the Staff view link at the foot of
+  // the page (works inside the USU website embed). Shows the internal BRC tier
+  // and the quote log.
   var staffMode = /[?&#]brc\b/.test(window.location.href);
-  if (!staffMode){ $('brcTierCard').style.display = 'none'; }
-  $('quoteLogBtn').hidden = !staffMode;
+  function applyStaffMode(){
+    $('brcTierCard').style.display = staffMode ? '' : 'none';
+    $('quoteLogBtn').hidden = !staffMode;
+    $('staffLink').textContent = staffMode ? 'Public view' : 'Staff view';
+    $('staffLink').href = staffMode ? location.pathname : '?brc';
+    if (!staffMode && getTierNum() === 1){
+      document.querySelector('input[name="tier"][value="2"]').checked = true;
+      updateTierCardStyles();
+      fillMaterialOptions();
+      renderReadout();
+    }
+  }
+  $('staffLink').addEventListener('click', function(e){
+    e.preventDefault();
+    staffMode = !staffMode;
+    try { history.replaceState(null, '', staffMode ? '?brc' : location.pathname); } catch (err){}
+    applyStaffMode();
+  });
 
   var materialSelect = $('material');
   MATERIALS.forEach(function(m){
@@ -1518,6 +1540,7 @@ var BRCModel = (function(){
 
   /* ---- init ---- */
   $('quoteDate').valueAsDate = new Date();
+  applyStaffMode();
   updateQuoteLogButton();
   fillMaterialOptions();
   updateMaterialNote();

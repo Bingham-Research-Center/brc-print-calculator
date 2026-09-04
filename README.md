@@ -4,7 +4,7 @@ Price calculator and invoice generator for the Bingham Research Center's Bambu H
 
 Live: https://bingham-research-center.github.io/brc-print-calculator/
 
-The public page shows the External tier, which covers everyone outside BRC, USU students and staff included. Staff: append `?brc` to the URL to also show the internal BRC tier, which pays materials, print time and setup but no labor and no sales tax.
+The public page shows the External tier, which covers everyone outside BRC, USU students and staff included. Staff: append `?brc` to the URL, or use the **Staff view** link at the foot of the page (it works inside the USU website embed too), to also show the internal BRC tier, which pays materials, print time and setup but no labor and no sales tax.
 
 To update prices, edit the `MATERIALS` / `TIERS` / `COLOR_OPTIONS` constants at the top of the `<script>` block in `index.html`.
 
