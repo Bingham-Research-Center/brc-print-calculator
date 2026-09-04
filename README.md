@@ -19,6 +19,12 @@ Drop a file on the "Model or sliced file" box (or click it) and the weight and p
 
 With a quantity above 1, the estimate spreads the pre-print overhead (`fixedSeconds`, `fixedGrams`) across the copies, assuming they print on one plate.
 
+**Colors** adds a filament surcharge to the price, and for a model-file estimate also multiplies the estimated print time and weight (two 3+ color H2C prints ran 2.5 to 3× the single-color time from AMS swaps and the prime tower). **Quantity** above 1 works out how many H2C plates the batch needs from the part's footprint and charges the pre-print overhead per plate. A sliced file reports how many parts are on the plate, and the invoice says so.
+
+The invoice states where the numbers came from: a sliced file, a model-file estimate, or values typed in. For an estimate it prints the price range implied by `EST.spread` (±25%), and the live readout shows the same range under the total.
+
+Staff (`?brc`) get a **Quote log** button under the readout: every generated quote is kept in that browser's local storage (quote number, date, customer, item, tier, source, material, weight, time, quantity, total) and downloads as CSV. It never leaves the browser, so keep it on the machine that does the quoting.
+
 **Print quality** only affects the model-file estimate: the fine-detail option (0.12 / 0.08 mm) uses thinner layers and 40 percent of the flow rate, which is what the H2C High Quality profiles measured at on a 0.12 mm PLA statue and a 0.08 mm PETG bracket. Sliced files carry their own layer height.
 
 STEP files are not supported; export STL or 3MF instead.

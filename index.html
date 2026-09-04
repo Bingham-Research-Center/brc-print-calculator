@@ -55,6 +55,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&amp;family=Inter:wght@400;500;600;700&amp;family=IBM+Plex+Mono:wght@500;600&amp;display=swap" rel="stylesheet">
 <style>
+  [hidden]{ display:none !important; }
   :root{
     --ink:#0F2439;        /* Aggie Blue */
     --paper:#FFFFFF;
@@ -240,6 +241,8 @@
     transition:opacity .15s ease;
   }
   .screen-total .tt-value.pulse{ animation:pulse .35s ease; }
+  .screen-range{ text-align:right; font-family:'IBM Plex Mono',monospace; font-size:.76rem; color:#9FB2C1; margin-top:4px; }
+  #quoteLogBtn{ margin-top:10px; }
   @keyframes pulse{ 0%{ opacity:.4; transform:translateY(1px);} 100%{ opacity:1; transform:translateY(0);} }
 
   .btn{
@@ -309,7 +312,6 @@
     display:grid; grid-template-columns:1.4fr 1fr auto; gap:10px; align-items:center;
     margin-top:12px; padding:14px; background:var(--paper); border:1px solid var(--line); border-radius:var(--radius);
   }
-  .send-brc[hidden]{ display:none; }
   .send-brc .btn{ width:auto; margin:0; padding:9px 22px; }
   #sendBrcStatus{ grid-column:1 / -1; font-size:.8rem; color:var(--muted); min-height:1em; }
   @media (max-width:640px){ .send-brc{ grid-template-columns:1fr; } }
@@ -471,9 +473,11 @@
           <span class="tt-label">Total</span>
           <span class="tt-value" id="outTotal">$0.00</span>
         </div>
+        <div class="screen-range" id="outRange" hidden></div>
       </div>
       <button class="btn btn-primary" id="generateBtn">Generate invoice</button>
       <div class="form-note">Includes Vernal, UT sales tax and card processing fee.</div>
+      <button class="btn btn-ghost" id="quoteLogBtn" hidden>Quote log</button>
     </aside>
 
   </div>
@@ -503,7 +507,7 @@
         <tfoot><tr><td>Total</td><td class="num" id="invTotal">$0.00</td></tr></tfoot>
       </table>
       <div class="invoice-footnote">
-        <p>Quote is an estimate based on sliced weight and print time; final price is confirmed at pickup.</p>
+        <p id="invBasis">Quote is an estimate based on sliced weight and print time; final price is confirmed at pickup.</p>
         <p class="fine">Total includes Vernal, UT sales tax and card processing fee. Questions: Bingham Research Center, 320 North Aggie Blvd, Vernal, UT 84078 · (435) 722-1740.</p>
       </div>
     </div>
@@ -610,10 +614,11 @@ var BRCModel = (function(){
   }
   // Metadata/slice_info.config inside a Bambu Studio 3MF that has been sliced.
   function parseSliceInfo(xml){
-    var out = { kind: 'sliced', seconds: 0, grams: 0, filamentType: null, plates: 0 }, m, v;
+    var out = { kind: 'sliced', seconds: 0, grams: 0, filamentType: null, plates: 0, objects: 0 }, m, v;
     var re = /<plate\b[^>]*>([\s\S]*?)<\/plate>/g;
     while ((m = re.exec(xml))){
       out.plates++;
+      out.objects += (m[1].match(/<object\b[^>]*>/g) || []).filter(function(o){ return !/skipped="true"/.test(o); }).length;
       if ((v = /key="prediction"\s+value="([\d.]+)"/.exec(m[1]))) out.seconds += +v[1];
       if ((v = /key="weight"\s+value="([\d.]+)"/.exec(m[1]))) out.grams += +v[1];
       if (!out.filamentType && (v = /<filament\b[^>]*\btype="([^"]+)"/.exec(m[1]))) out.filamentType = v[1];
@@ -754,23 +759,31 @@ var BRCModel = (function(){
 
   /* ---- estimate model ---- */
   // m: meshMetrics(); est: EST constants; mat: { density g/cm³, flow mm³/s }.
-  // Per-copy estimate. qty: copies printed on one plate; the pre-print
-  // overhead (fixedSeconds, fixedGrams) is spread across them.
+  // Copies that fit on one plate: bounding boxes on a grid, either way round.
+  function perPlate(size, est){
+    var g = est.partGap || 0, fit = function(a, b){ return Math.floor((est.bedX + g) / (a + g)) * Math.floor((est.bedY + g) / (b + g)); };
+    return Math.max(1, fit(size[0], size[1]), fit(size[1], size[0]));
+  }
+
+  // Per-copy estimate. qty: copies in the batch; the pre-print overhead
+  // (fixedSeconds, fixedGrams) is charged once per plate and spread across them.
   function estimate(m, est, mat, withSupports, qty){
     var copies = Math.max(1, Math.floor(qty) || 1);
+    var fits = est.bedX ? perPlate(m.size, est) : copies, plates = Math.ceil(copies / fits);
     var shell = Math.min(m.volume, m.topW * est.topThickness + m.botW * est.bottomThickness + m.wallW * est.wallThickness);
     var infill = (m.volume - shell) * est.infill;
     var support = withSupports ? m.overhangArea * m.overhangDrop * est.supportDensity : 0;
     var extruded = shell + infill + support;
     var layers = Math.max(1, Math.ceil(m.height / est.layerHeight - 1e-6));
-    var seconds = (extruded - support) / mat.flow + support / (est.supportFlow || mat.flow) + layers * est.layerSeconds + est.fixedSeconds / copies;
-    return { extruded: extruded, support: support, layers: layers, grams: extruded / 1000 * mat.density + est.fixedGrams / copies, hours: seconds / 3600 };
+    var seconds = (extruded - support) / mat.flow + support / (est.supportFlow || mat.flow) + layers * est.layerSeconds + est.fixedSeconds * plates / copies;
+    return { extruded: extruded, support: support, layers: layers, plates: plates, perPlate: fits,
+      grams: extruded / 1000 * mat.density + est.fixedGrams * plates / copies, hours: seconds / 3600 };
   }
 
   return {
     readZip: readZip, parseDuration: parseDuration, parseGcode: parseGcode, parseSliceInfo: parseSliceInfo,
     parseSTL: parseSTL, parseOBJ: parseOBJ, parse3MFModel: parse3MFModel, parse3MF: parse3MF,
-    meshMetrics: meshMetrics, estimate: estimate
+    meshMetrics: meshMetrics, perPlate: perPlate, estimate: estimate
   };
 })();
 /* BRC_MODEL_END */
@@ -803,10 +816,14 @@ var BRCModel = (function(){
     2: { label:'External / public', hourlyRate:3.00, labor:10.00, setup:0,    minCharge:15.00, taxExempt:false }
   };
 
+  // mult: filament price multiplier. estTime / estGrams: what the model-file
+  // estimate multiplies print time and weight by. AMS colour swaps and the prime
+  // tower ran two 3+ colour H2C prints at 2.5 to 3x the single-colour time and
+  // 1.4 to 1.7x the weight; the 5–6 colour values are extrapolated from that.
   var COLOR_OPTIONS = {
-    '1': { mult:1.00, label:'1–2 colors' },
-    '2': { mult:1.10, label:'3–4 colors (+10% filament)' },
-    '3': { mult:1.20, label:'5–6 colors (+20% filament)' }
+    '1': { mult:1.00, label:'1–2 colors',                 estTime:1,   estGrams:1 },
+    '2': { mult:1.10, label:'3–4 colors (+10% filament)', estTime:2,   estGrams:1.3 },
+    '3': { mult:1.20, label:'5–6 colors (+20% filament)', estTime:2.5, estGrams:1.4 }
   };
 
   // Estimate model for raw STL / 3MF / OBJ files. Geometry from the H2C
@@ -825,7 +842,10 @@ var BRCModel = (function(){
     supportFlow: 1.5,       // mm³/s while printing support: thin tree branches, lots of travel
     layerSeconds: 4.5,      // per-layer overhead: travel, z moves, small features
     fixedSeconds: 360,      // pre-print: leveling, purge line, nozzle prep
-    fixedGrams: 1           // purge line
+    fixedGrams: 1,          // purge line
+    spread: 0.25,           // how far weight and time can be off, for the quoted price range
+    bedX: 350, bedY: 320,   // mm, H2C plate; decides how many copies share one plate
+    partGap: 6              // mm between copies on the plate
   };
 
   // Print quality for the model-file estimate. On the two fine-layer slices
@@ -890,6 +910,12 @@ var BRCModel = (function(){
     };
   }
 
+  // Price band for a model-file estimate: weight and time both off by ±spread.
+  function priceRange(inp, spread){
+    var s = spread || 0.25, at = function(k){ return price(Object.assign({}, inp, { grams: inp.grams * k, hours: inp.hours * k })).grandTotal; };
+    return { low: at(1 - s), high: at(1 + s) };
+  }
+
   function buildLines(c){
     var lines = [];
     var per = c.qty > 1 ? c.qty + ' × ' : '';
@@ -932,6 +958,7 @@ var BRCModel = (function(){
   // Staff quoting view: append ?brc to the URL to show the internal BRC tier.
   var staffMode = /[?&#]brc\b/.test(window.location.href);
   if (!staffMode){ $('brcTierCard').style.display = 'none'; }
+  $('quoteLogBtn').hidden = !staffMode;
 
   var materialSelect = $('material');
   MATERIALS.forEach(function(m){
@@ -1005,6 +1032,10 @@ var BRCModel = (function(){
     }
     lastTotal = c.grandTotal;
 
+    var range = numbersSource() === 'estimate' ? priceRange(readForm(), EST.spread) : null;
+    $('outRange').hidden = !range;
+    if (range) $('outRange').textContent = 'estimate range ' + money(range.low) + ' – ' + money(range.high);
+
     var ready = c.grams > 0 && $('custName').value.trim() !== '' && $('jobDesc').value.trim() !== '';
     $('generateBtn').disabled = !ready;
 
@@ -1037,7 +1068,7 @@ var BRCModel = (function(){
     });
     t.push('TOTAL: ' + money(inv.c.grandTotal));
     t.push('');
-    t.push('Estimate based on sliced weight and print time; final price confirmed at pickup.');
+    t.push(inv.basis);
     t.push('Bingham Research Center · (435) 722-1740');
     return t.join('\n');
   }
@@ -1054,19 +1085,35 @@ var BRCModel = (function(){
       slug($('custName').value) + '_' + slug($('jobDesc').value) + '.pdf';
   }
 
+  // Where the weight and time came from: 'slicer', 'estimate', or 'entered'.
+  function numbersSource(){
+    if (!lastModel) return 'entered';
+    return lastModel.metrics ? 'estimate' : 'slicer';
+  }
+
+  function basisText(src, range){
+    if (src === 'slicer') return 'Quote is based on the sliced file’s weight and print time. Final price is confirmed at pickup.';
+    if (src === 'estimate') return 'Quote is an estimate from the model file. Weight and print time are within about ±' + Math.round(EST.spread * 100) + '%, so expect a final price between ' + money(range.low) + ' and ' + money(range.high) + ', confirmed from the actual slice at pickup.';
+    return 'Quote is based on the weight and print time provided. Final price is confirmed at pickup.';
+  }
+
   function generateInvoice(){
     var c = calculate();
     var lines = buildLines(c);
+    var src = numbersSource(), range = src === 'estimate' ? priceRange(readForm(), EST.spread) : null, basis = basisText(src, range);
 
     var quoteNo = 'Quote #' + generateQuoteNumber();
     $('invNumber').textContent = quoteNo;
     var d = $('quoteDate').value ? new Date($('quoteDate').value + 'T00:00:00') : new Date();
     $('invDate').textContent = d.toLocaleDateString('en-US', { year:'numeric', month:'long', day:'numeric' });
 
-    var job = $('jobDesc').value.trim() + (c.qty > 1 ? ' × ' + c.qty : '');
+    var job = $('jobDesc').value.trim(), parts = src === 'slicer' ? lastModel.sliced.objects : 0;
+    if (parts > 1) job += ' (' + parts + ' parts' + (c.qty > 1 ? ' per plate × ' + c.qty + ' plates' : '') + ')';
+    else if (c.qty > 1) job += ' × ' + c.qty;
     $('invCustomer').textContent = $('custName').value.trim();
     $('invJob').textContent = job;
     $('invTier').textContent = c.tier.label;
+    $('invBasis').textContent = basis;
 
     var tbody = $('invLines');
     tbody.innerHTML = '';
@@ -1090,9 +1137,10 @@ var BRCModel = (function(){
       quoteNo: quoteNo.replace('Quote #', ''),
       dateStr: $('invDate').textContent,
       customer: $('custName').value.trim(),
-      job: job,
+      job: job, basis: basis, source: src,
       filename: invoiceFilename(c, d)
     };
+    logQuote(lastInvoice, d);
     $('sendNote').hidden = true;
     $('sendBrcPanel').hidden = true;
     $('sendBrcStatus').textContent = '';
@@ -1102,6 +1150,30 @@ var BRCModel = (function(){
       $('invoiceWrap').scrollIntoView({ behavior:scrollMode, block:'start' });
     }
   }
+
+  /* ---- quote log: kept in this browser's localStorage, CSV download for staff ---- */
+  var QUOTE_LOG_KEY = 'brc-quotes', QUOTE_LOG_MAX = 1000;
+  function readQuoteLog(){
+    try { return JSON.parse(localStorage.getItem(QUOTE_LOG_KEY) || '[]'); } catch (e){ return []; }
+  }
+  function logQuote(inv, d){
+    var log = readQuoteLog();
+    log.push({ quote: inv.quoteNo, date: d.toISOString().slice(0, 10), customer: inv.customer, item: inv.job, tier: inv.c.tier.label,
+      source: inv.source, material: inv.c.material.name, grams: inv.c.grams, hours: inv.c.hours, qty: inv.c.qty, total: inv.c.grandTotal.toFixed(2) });
+    try { localStorage.setItem(QUOTE_LOG_KEY, JSON.stringify(log.slice(-QUOTE_LOG_MAX))); } catch (e){}
+    updateQuoteLogButton();
+  }
+  function updateQuoteLogButton(){
+    var n = readQuoteLog().length;
+    $('quoteLogBtn').textContent = n ? 'Quote log — ' + n + ' quote' + (n === 1 ? '' : 's') + ' (CSV)' : 'Quote log — empty';
+    $('quoteLogBtn').disabled = !n;
+  }
+  $('quoteLogBtn').addEventListener('click', function(){
+    var cols = ['quote','date','customer','item','tier','source','material','grams','hours','qty','total'];
+    var esc = function(v){ return '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"'; };
+    var csv = [cols.join(',')].concat(readQuoteLog().map(function(r){ return cols.map(function(k){ return esc(r[k]); }).join(','); })).join('\r\n');
+    downloadBlob(new Blob([csv], { type:'text/csv' }), 'brc-quote-log.csv');
+  });
 
   /* ---- model / sliced file intake ---- */
   var lastModel = null; // { sliced, calib, metrics, meshNames, errors } or null
@@ -1132,9 +1204,10 @@ var BRCModel = (function(){
       try {
         var r = await parseModelFile(files[i]);
         if (r.kind === 'mesh'){ meshes.push(r.tris); meshNames.push(files[i].name); continue; }
-        sliced = sliced || { seconds:0, grams:0, filamentType:null };
+        sliced = sliced || { seconds:0, grams:0, filamentType:null, objects:0 };
         sliced.seconds += r.seconds;
         sliced.grams += r.grams;
+        sliced.objects += r.objects || 0;
         sliced.filamentType = sliced.filamentType || r.filamentType;
         calib = calib || r.tris || null;
       } catch (e){ errors.push(files[i].name + ' (' + e.message + ')'); }
@@ -1167,7 +1240,7 @@ var BRCModel = (function(){
     if (L.sliced){
       hours += L.sliced.seconds / 3600;
       grams += L.sliced.grams;
-      parts.push('From slicer: ' + fmtDuration(L.sliced.seconds) + ', ' + L.sliced.grams.toFixed(1) + ' g' + (L.sliced.filamentType ? ' ' + L.sliced.filamentType : '') + ' (exact' + (copies > 1 ? ', per plate × ' + copies + ' plates' : '') + ').');
+      parts.push('From slicer: ' + fmtDuration(L.sliced.seconds) + ', ' + L.sliced.grams.toFixed(1) + ' g' + (L.sliced.filamentType ? ' ' + L.sliced.filamentType : '') + (L.sliced.objects > 1 ? ', ' + L.sliced.objects + ' parts on the plate' : '') + ' (exact' + (copies > 1 ? ', per plate × ' + copies + ' plates' : '') + ').');
       if (L.qtyReset && copies === 1) parts.push('Quantity was reset to 1: the sliced file already covers every copy on the plate. Set it to the number of plates if this plate prints more than once.');
       if (staffMode && L.calib){
         var cm = BRCModel.meshMetrics(L.calib, EST.overhangAngle);
@@ -1180,10 +1253,12 @@ var BRCModel = (function(){
       var q = QUALITY[$('quality').value] || QUALITY.standard;
       var est = Object.assign({}, EST, { layerHeight: q.layerHeight });
       var matQ = { density: mat.density, flow: mat.flow * q.flowScale };
+      var col = COLOR_OPTIONS[$('colors').value] || COLOR_OPTIONS['1'];
       var m = L.metrics, e = BRCModel.estimate(m, est, matQ, $('supports').checked, copies);
-      hours += e.hours;
-      grams += e.grams;
-      parts.push('Estimated from ' + L.meshNames.join(', ') + ': ' + (e.extruded / 1000).toFixed(1) + ' cm³ of material, ' + Math.round(m.height) + ' mm tall (' + e.layers + ' layers)' + (copies > 1 ? ' per copy, with the pre-print setup spread across ' + copies + ' copies on one plate' : '') + '. Rough estimate (±25%); the final quote uses the actual slice.');
+      hours += e.hours * col.estTime;
+      grams += e.grams * col.estGrams;
+      parts.push('Estimated from ' + L.meshNames.join(', ') + ': ' + (e.extruded / 1000).toFixed(1) + ' cm³ of material, ' + Math.round(m.height) + ' mm tall (' + e.layers + ' layers)' + (copies > 1 ? ' per copy, with the pre-print setup spread across ' + copies + ' copies on ' + (e.plates > 1 ? e.plates + ' plates (' + e.perPlate + ' per plate)' : 'one plate') : '') + '. Rough estimate (±' + Math.round(EST.spread * 100) + '%); the final quote uses the actual slice.');
+      if (col.estTime > 1) parts.push('Multi-color: print time × ' + col.estTime + ' and material × ' + col.estGrams + ' for AMS swaps and the prime tower.');
       if (m.overhangArea >= EST.overhangMinArea) parts.push('Overhangs found (' + (m.overhangArea / 100).toFixed(1) + ' cm²): supports ' + ($('supports').checked ? 'added' : 'suggested') + '.');
       if (m.suspect) parts.push('The mesh does not look closed, so the material figure is unreliable.');
     }
@@ -1209,9 +1284,8 @@ var BRCModel = (function(){
   ['grams','hours'].forEach(function(id){
     $(id).addEventListener('input', clearModel);
   });
-  ['colors'].forEach(function(id){
-    $(id).addEventListener('change', renderReadout);
-  });
+  $('colors').addEventListener('change', renderReadout);
+  $('colors').addEventListener('change', fillFromModel);
   ['abrasive','drying','supports'].forEach(function(id){
     $(id).addEventListener('change', renderReadout);
   });
@@ -1443,6 +1517,7 @@ var BRCModel = (function(){
 
   /* ---- init ---- */
   $('quoteDate').valueAsDate = new Date();
+  updateQuoteLogButton();
   fillMaterialOptions();
   updateMaterialNote();
   updateTierCardStyles();

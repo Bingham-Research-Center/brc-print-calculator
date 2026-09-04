@@ -7,7 +7,7 @@ import { readFileSync } from 'node:fs';
 const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
 const start = html.indexOf('/* BRC_PRICE_START */'), end = html.indexOf('/* BRC_PRICE_END */');
 assert.ok(start > 0 && end > start, 'BRC_PRICE block not found in index.html');
-const P = new Function(html.slice(start, end) + '\nreturn { price, buildLines, MATERIALS, TIERS, TAX_RATE, PROCESSING_FEE_RATE, EST, QUALITY };')();
+const P = new Function(html.slice(start, end) + '\nreturn { price, priceRange, buildLines, MATERIALS, TIERS, TAX_RATE, PROCESSING_FEE_RATE, EST, QUALITY, COLOR_OPTIONS };')();
 
 const near = (a, b, tol = 1e-9) => assert.ok(Math.abs(a - b) <= tol, `${a} != ${b}`);
 const pla = P.MATERIALS[0];
@@ -91,4 +91,19 @@ test('print quality: standard matches the estimate profile, fine detail slows th
   assert.equal(P.QUALITY.standard.flowScale, 1);
   assert.ok(P.QUALITY.fine.layerHeight < P.EST.layerHeight);
   assert.equal(P.QUALITY.fine.flowScale, 0.4);
+});
+
+test('price range: ±25% on weight and time, flat fees unmoved', () => {
+  const c = job({ qty: 2, supports: true }), r = P.priceRange({ material: pla, tierNum: 2, grams: 50, hours: 4, qty: 2, colorKey: '1', abrasive: false, drying: false, supports: true }, 0.25);
+  near(r.low, job({ qty: 2, supports: true, grams: 37.5, hours: 3 }).grandTotal);
+  near(r.high, job({ qty: 2, supports: true, grams: 62.5, hours: 5 }).grandTotal);
+  assert.ok(r.low < c.grandTotal && c.grandTotal < r.high);
+});
+
+test('multi-colour estimate multipliers grow with the colour count', () => {
+  assert.equal(P.COLOR_OPTIONS['1'].estTime, 1);
+  assert.equal(P.COLOR_OPTIONS['1'].estGrams, 1);
+  assert.ok(P.COLOR_OPTIONS['2'].estTime > 1 && P.COLOR_OPTIONS['3'].estTime >= P.COLOR_OPTIONS['2'].estTime);
+  assert.ok(P.COLOR_OPTIONS['2'].estGrams > 1 && P.COLOR_OPTIONS['3'].estGrams >= P.COLOR_OPTIONS['2'].estGrams);
+  assert.ok(P.EST.bedX > 300 && P.EST.bedY > 300 && P.EST.spread > 0);
 });

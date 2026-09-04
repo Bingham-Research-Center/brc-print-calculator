@@ -220,6 +220,20 @@ test('estimate: pre-print overhead is spread across a batch of copies', () => {
   for (const q of [undefined, 0, NaN, 1.9]) near(M.estimate(m, EST, PLA, false, q).hours, one.hours, 1e-12);
 });
 
+test('estimate: a batch that needs several plates pays the pre-print overhead per plate', () => {
+  const bed = { ...EST, bedX: 350, bedY: 320, partGap: 6 };
+  assert.equal(M.perPlate([200, 200, 10], bed), 1);
+  assert.equal(M.perPlate([100, 300, 10], bed), 3);    // 3 across when turned sideways (300 along the 350 mm axis)
+  assert.equal(M.perPlate([10, 10, 10], bed), 22 * 20);
+  const big = M.meshMetrics(boxTris([0, 0, 0], [200, 200, 10]), 30), small = M.meshMetrics(CUBE, 30);
+  const b4 = M.estimate(big, bed, PLA, false, 4), b1 = M.estimate(big, bed, PLA, false, 1);
+  assert.equal(b4.plates, 4);
+  near(b4.hours, b1.hours, 1e-12);                     // one part per plate: nothing to spread
+  const s4 = M.estimate(small, bed, PLA, false, 4);
+  assert.equal(s4.plates, 1);
+  near(M.estimate(small, bed, PLA, false, 1).hours - s4.hours, 360 * 0.75 / 3600, 1e-9);
+});
+
 test('estimate: thin sheet is all shell, no infill', () => {
   const e = M.estimate(M.meshMetrics(boxTris([0, 0, 0], [100, 100, 0.5]), 30), EST, PLA, false);
   near(e.extruded, 5000);
@@ -295,11 +309,12 @@ test('3MF: unit attribute scales to mm', async () => {
 
 test('3MF: sliced Bambu project sums plates and keeps the mesh for calibration', async () => {
   const info = `<?xml version="1.0" encoding="UTF-8"?><config><header><header_item key="X-BBL-Client-Type" value="slicer"/></header>
-<plate><metadata key="index" value="1"/><metadata key="prediction" value="8673"/><metadata key="weight" value="39.76"/><filament id="1" tray_info_idx="GFL99" type="PLA" color="#FFFFFF" used_m="13.25" used_g="39.76"/></plate>
-<plate><metadata key="index" value="2"/><metadata key="prediction" value="1000"/><metadata key="weight" value="0.24"/></plate></config>`;
+<plate><metadata key="index" value="1"/><metadata key="prediction" value="8673"/><metadata key="weight" value="39.76"/><object identify_id="1" name="a" skipped="false"/><object identify_id="2" name="b" skipped="false"/><object identify_id="3" name="c" skipped="true"/><filament id="1" tray_info_idx="GFL99" type="PLA" color="#FFFFFF" used_m="13.25" used_g="39.76"/></plate>
+<plate><metadata key="index" value="2"/><metadata key="prediction" value="1000"/><metadata key="weight" value="0.24"/><object identify_id="4" name="d"/></plate></config>`;
   const r = await M.parse3MF(zip([{ name: '3D/3dmodel.model', data: modelXML(CUBE) }, { name: 'Metadata/slice_info.config', data: info }]));
   assert.equal(r.kind, 'sliced');
   assert.equal(r.plates, 2);
+  assert.equal(r.objects, 3); // skipped objects are not printed
   assert.equal(r.seconds, 9673);
   near(r.grams, 40);
   assert.equal(r.filamentType, 'PLA');
