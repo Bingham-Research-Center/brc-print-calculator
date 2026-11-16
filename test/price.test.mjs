@@ -13,8 +13,9 @@ const near = (a, b, tol = 1e-9) => assert.ok(Math.abs(a - b) <= tol, `${a} != ${
 const pla = P.MATERIALS[0];
 const job = (over) => P.price({ material: pla, tierNum: 2, grams: 50, hours: 4, qty: 1, colorKey: '1', abrasive: false, drying: false, supports: false, ...over });
 
-test('two tiers only, and every material prices both', () => {
-  assert.deepEqual(Object.keys(P.TIERS), ['1', '2']);
+test('three tiers, and every material prices BRC and external (Reports reuses BRC)', () => {
+  assert.deepEqual(Object.keys(P.TIERS), ['1', '2', '3']);
+  assert.equal(P.TIERS[3].rateTier, 1);
   assert.equal(P.TIERS[1].taxExempt, true);
   assert.equal(P.TIERS[2].taxExempt, false);
   for (const m of P.MATERIALS) assert.deepEqual(Object.keys(m.rates), ['1', '2']);
@@ -44,6 +45,19 @@ test('BRC tier: materials, print time and setup; no labor, no sales tax; card fe
   near(c.grandTotal, c.costSubtotal * (1 + P.PROCESSING_FEE_RATE));
   assert.ok(P.buildLines(c).some(l => l.label.startsWith('Sales tax — exempt') && l.value === 0));
   assert.equal(job({ tierNum: 1, grams: 1, hours: 0.1 }).minApplied, false); // no BRC minimum
+});
+
+test('Reports tier: BRC pricing with no sales tax, no card fee and no subtotal line', () => {
+  const opts = { qty: 3, colorKey: '2', supports: true };
+  const brc = job({ ...opts, tierNum: 1 }), rep = job({ ...opts, tierNum: 3 });
+  near(rep.pricePerGram, brc.pricePerGram);
+  near(rep.costSubtotal, brc.costSubtotal);
+  assert.equal(rep.salesTax, 0);
+  assert.equal(rep.processingFee, 0);
+  near(rep.grandTotal, brc.costSubtotal);
+  const labels = P.buildLines(rep).map(l => l.label);
+  assert.ok(!labels.some(l => /Subtotal|Sales tax|Card processing/.test(l)), labels.join(' | '));
+  assert.deepEqual(labels, P.buildLines(brc).map(l => l.label).slice(0, labels.length));
 });
 
 test('quantity multiplies filament, color surcharge and print time only', () => {
